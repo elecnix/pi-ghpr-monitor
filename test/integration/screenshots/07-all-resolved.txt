@@ -1,0 +1,99 @@
+
+nicolas.marchildon@Nicolas-Marchildon pi-ghpr-monitor % bash '/Users/nicolas.marchildon/pi-ghpr-monitor/test/integration
+/screenshots/.tmux-cmd.sh'
+"'=== pi-ghpr-monitor Extension ==='"
+"'Commands: /ghpr-monitor [on|off|owner/repo number]'"
+"'Tool: ghpr-monitor (action=start|stop|status)'"
+nicolas.marchildon@Nicolas-Marchildon pi-ghpr-monitor % bash '/Users/nicolas.marchildon/pi-ghpr-monitor/test/integration
+/screenshots/.tmux-cmd.sh'
+"'Starting PR monitor for v2nic/gh-pr-review#42'"
+nicolas.marchildon@Nicolas-Marchildon pi-ghpr-monitor % bash '/Users/nicolas.marchildon/pi-ghpr-monitor/test/integration
+/screenshots/.tmux-cmd.sh'
+{
+    "unresolvedThreads": 2,
+    "generalComments": 1,
+    "hasConflicts": false,
+    "failingChecks": [],
+    "pendingChecks": [
+        "ci/test"
+    ],
+    "passingChecks": [
+        "ci/build"
+    ],
+    "commentAuthors": [
+        "reviewer1"
+    ],
+    "lastCommentBody": "Please fix the typo in the README"
+}
+nicolas.marchildon@Nicolas-Marchildon pi-ghpr-monitor % bash '/Users/nicolas.marchildon/pi-ghpr-monitor/test/integration
+/screenshots/.tmux-cmd.sh'
+{
+    "unresolvedThreads": 3,
+    "generalComments": 2,
+    "hasConflicts": false,
+    "failingChecks": [],
+    "pendingChecks": [
+        "ci/test"
+    ],
+    "passingChecks": [
+        "ci/build"
+    ],
+    "commentAuthors": [
+        "reviewer1"
+    ],
+    "lastCommentBody": "This needs to be fixed before merging"
+}
+nicolas.marchildon@Nicolas-Marchildon pi-ghpr-monitor % bash '/Users/nicolas.marchildon/pi-ghpr-monitor/test/integration
+/screenshots/.tmux-cmd.sh'
+{
+    "unresolvedThreads": 3,
+    "generalComments": 2,
+    "hasConflicts": false,
+    "failingChecks": [
+        "ci/test"
+    ],
+    "pendingChecks": [],
+    "passingChecks": [
+        "ci/build"
+    ],
+    "commentAuthors": [
+        "reviewer1"
+    ],
+    "lastCommentBody": "This needs to be fixed before merging"
+}
+nicolas.marchildon@Nicolas-Marchildon pi-ghpr-monitor % bash '/Users/nicolas.marchildon/pi-ghpr-monitor/test/integration
+/screenshots/.tmux-cmd.sh'
+{
+    "unresolvedThreads": 3,
+    "generalComments": 2,
+    "hasConflicts": true,
+    "failingChecks": [
+        "ci/test"
+    ],
+    "pendingChecks": [],
+    "passingChecks": [
+        "ci/build"
+    ],
+    "commentAuthors": [
+        "reviewer1"
+    ],
+    "lastCommentBody": "This needs to be fixed before merging"
+}
+nicolas.marchildon@Nicolas-Marchildon pi-ghpr-monitor % bash '/Users/nicolas.marchildon/pi-ghpr-monitor/test/integration
+/screenshots/.tmux-cmd.sh'
+{
+    "unresolvedThreads": 0,
+    "generalComments": 0,
+    "hasConflicts": false,
+    "failingChecks": [],
+    "pendingChecks": [],
+    "passingChecks": [
+        "ci/test",
+        "ci/build"
+    ],
+    "commentAuthors": [
+        "reviewer1"
+    ],
+    "lastCommentBody": "This needs to be fixed before merging"
+}
+nicolas.marchildon@Nicolas-Marchildon pi-ghpr-monitor %

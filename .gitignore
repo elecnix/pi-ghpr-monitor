@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.js
+*.d.ts
+*.js.map
+!test/integration/run-screenshots.js
+.DS_Store
+*.tgz
+.tmux-cmd.*

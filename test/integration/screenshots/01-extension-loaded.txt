@@ -1,0 +1,41 @@
+
+nicolas.marchildon@Nicolas-Marchildon pi-ghpr-monitor % bash '/Users/nicolas.marchildon/pi-ghpr-monitor/test/integration
+/screenshots/.tmux-cmd.sh'
+"'=== pi-ghpr-monitor Extension ==='"
+"'Commands: /ghpr-monitor [on|off|owner/repo number]'"
+"'Tool: ghpr-monitor (action=start|stop|status)'"
+nicolas.marchildon@Nicolas-Marchildon pi-ghpr-monitor %
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
