@@ -47,6 +47,8 @@ export interface PullRequestData {
 	reviewThreads: { nodes: ReviewThreadNode[] };
 	mergeable: string;
 	mergeStateStatus: string;
+	state: string;
+	merged: boolean;
 	commits: { nodes: CommitNode[] };
 }
 

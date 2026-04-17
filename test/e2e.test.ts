@@ -94,6 +94,8 @@ function buildResponse() {
 					reviewThreads: { nodes: reviewThreadNodes },
 					mergeable: state.hasConflicts ? "CONFLICTING" : "MERGEABLE",
 					mergeStateStatus: state.hasConflicts ? "DIRTY" : "CLEAN",
+					state: (state as any).state || "OPEN",
+					merged: (state as any).merged || false,
 					commits: { nodes: [{ commit: { checkSuites: { nodes: checkSuiteNodes } } }] },
 				},
 			},
@@ -267,4 +269,41 @@ describe("Extension monitoring with mock GitHub server", () => {
 		expect(after.hasConflicts).toBe(false);
 		expect(after.unresolvedThreads).toBe(2);
 	});
+});
+it("detects merged PR in GraphQL response", async () => {
+	await fetch(`http://localhost:${GH_PORT}/state`, {
+		method: "PUT",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ state: "MERGED", merged: true }),
+	});
+	const resp = await fetch(`http://localhost:${GH_PORT}/graphql`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ query: "test", variables: {} }),
+	});
+	const data = await resp.json();
+	expect(data.data.repository.pullRequest.state).toBe("MERGED");
+	expect(data.data.repository.pullRequest.merged).toBe(true);
+
+	// Reset
+	await fetch(`http://localhost:${GH_PORT}/reset`, { method: "POST" });
+});
+
+it("detects closed PR in GraphQL response", async () => {
+	await fetch(`http://localhost:${GH_PORT}/state`, {
+		method: "PUT",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ state: "CLOSED" }),
+	});
+	const resp = await fetch(`http://localhost:${GH_PORT}/graphql`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ query: "test", variables: {} }),
+	});
+	const data = await resp.json();
+	expect(data.data.repository.pullRequest.state).toBe("CLOSED");
+	expect(data.data.repository.pullRequest.merged).toBe(false);
+
+	// Reset
+	await fetch(`http://localhost:${GH_PORT}/reset`, { method: "POST" });
 });

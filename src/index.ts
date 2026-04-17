@@ -37,6 +37,8 @@ const AWAIT_QUERY = `query AwaitPR(
 ) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
+      state
+      merged
       comments(first: $firstComments) {
         nodes { id body author { login } createdAt }
         pageInfo { hasNextPage endCursor }
@@ -290,6 +292,17 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 
 			try {
 				const pr = await fetchPRData(config, signal, mockBaseUrl);
+
+				// Check if PR was merged or closed
+				if (pr.state === "MERGED" || pr.state === "CLOSED") {
+					const prLabel = `${config.owner}/${config.repo}#${config.number}`;
+					const reason = pr.merged ? "merged" : "closed";
+					const msg = `${pr.merged ? "🔀" : "❌"} PR ${prLabel} was ${reason}. Monitoring stopped.`;
+					pi.sendUserMessage(msg, {deliverAs: "steer"});
+					stopMonitor();
+					return;
+				}
+
 				const curr = snapshotPR(pr);
 				const update = formatStatusUpdate(lastStatus, curr, config);
 

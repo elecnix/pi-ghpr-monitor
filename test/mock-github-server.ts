@@ -126,6 +126,8 @@ function buildGraphQLResponse(state: MockPRState): object {
 					},
 					mergeable: state.hasConflicts ? "CONFLICTING" : "MERGEABLE",
 					mergeStateStatus: state.hasConflicts ? "DIRTY" : "CLEAN",
+					state: (state as any).state || "OPEN",
+					merged: (state as any).merged || false,
 					commits: {
 						nodes: [
 							{
