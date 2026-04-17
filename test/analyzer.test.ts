@@ -397,3 +397,100 @@ describe("formatActionableItems", () => {
 		expect(result).not.toContain("pending");
 	});
 });
+
+describe("formatStatusUpdate with detail", () => {
+	const config: MonitorConfig = {
+		owner: "owner",
+		repo: "repo",
+		number: 42,
+		host: "github.com",
+		mode: "all",
+		intervalSec: 60,
+		debounceSec: 30,
+	};
+
+	it("includes thread details in notifications", () => {
+		const curr: PRStatus = {
+			unresolvedThreads: 2,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+			threadDetails: [
+				{ id: "PRRT_1", isResolved: false, isOutdated: false, commentCount: 1, lastCommentAuthor: "reviewer", lastCommentBody: "Please fix this typo" },
+				{ id: "PRRT_2", isResolved: false, isOutdated: false, commentCount: 1, lastCommentAuthor: "bot", lastCommentBody: "Build failed" },
+			],
+			commentDetails: [],
+			checkDetails: [],
+		};
+		const result = formatStatusUpdate(null, curr, config);
+		expect(result).toContain("PRRT_1");
+		expect(result).toContain("reviewer");
+		expect(result).toContain("Please fix this typo");
+		expect(result).toContain("PRRT_2");
+	});
+
+	it("includes comment details in notifications", () => {
+		const curr: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 1,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+			threadDetails: [],
+			commentDetails: [
+				{ id: "C_1", author: "teammate", body: "Can you add tests?" },
+			],
+			checkDetails: [],
+		};
+		const result = formatStatusUpdate(null, curr, config);
+		expect(result).toContain("C_1");
+		expect(result).toContain("teammate");
+		expect(result).toContain("Can you add tests?");
+	});
+
+	it("includes check details for failing CI", () => {
+		const curr: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: ["ci/test"],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+			threadDetails: [],
+			commentDetails: [],
+			checkDetails: [
+				{ name: "ci/test", conclusion: "FAILURE" },
+			],
+		};
+		const result = formatStatusUpdate(null, curr, config);
+		expect(result).toContain("ci/test");
+		expect(result).toContain("FAILURE");
+	});
+
+	it("truncates long comment bodies", () => {
+		const longBody = "A".repeat(200);
+		const curr: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 1,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+			threadDetails: [],
+			commentDetails: [
+				{ id: "C_1", author: "user", body: longBody },
+			],
+			checkDetails: [],
+		};
+		const result = formatStatusUpdate(null, curr, config);
+		expect(result).toContain("…");
+		expect(result).not.toContain(longBody);
+	});
+});
