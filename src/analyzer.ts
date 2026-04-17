@@ -209,3 +209,34 @@ export function formatStatusUpdate(prev: PRStatus | null, curr: PRStatus, config
 
 	return lines.join("\n");
 }
+
+/**
+ * Format a reminder listing all actionable items in the current PR status.
+ *
+ * Unlike formatStatusUpdate (which only reports changes), this always lists
+ * every actionable item. Returns null when nothing needs the agent's attention.
+ *
+ * Used to nudge the agent after it goes idle with unresolved items.
+ */
+export function formatActionableItems(status: PRStatus, config: MonitorConfig): string | null {
+	const lines: string[] = [];
+	const prLabel = `${config.owner}/${config.repo}#${config.number}`;
+
+	if (status.hasConflicts) {
+		lines.push(`⚠️  Merge conflicts detected on ${prLabel}`);
+	}
+
+	if (status.failingChecks.length > 0) {
+		lines.push(`❌ Failing CI checks on ${prLabel}: ${status.failingChecks.join(", ")}`);
+	}
+
+	if (status.unresolvedThreads > 0) {
+		lines.push(`💬 ${status.unresolvedThreads} unresolved review thread(s) on ${prLabel}`);
+	}
+
+	if (status.generalComments > 0) {
+		lines.push(`📝 ${status.generalComments} general comment(s) on ${prLabel}`);
+	}
+
+	return lines.length > 0 ? lines.join("\n") : null;
+}

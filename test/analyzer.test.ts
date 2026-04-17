@@ -12,6 +12,7 @@ import {
 	failingChecks,
 	pendingChecks,
 	formatStatusUpdate,
+	formatActionableItems,
 } from "../src/analyzer";
 import type { PullRequestData, PRStatus, MonitorConfig, CommitNode } from "../src/analyzer";
 
@@ -268,5 +269,131 @@ describe("formatStatusUpdate", () => {
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		expect(update).toContain("pending");
+	});
+});
+describe("formatActionableItems", () => {
+	const config: MonitorConfig = {
+		owner: "owner",
+		repo: "repo",
+		number: 42,
+		host: "github.com",
+		mode: "all",
+		intervalSec: 60,
+		debounceSec: 30,
+	};
+
+	it("returns null when nothing is actionable", () => {
+		const status: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+		};
+		expect(formatActionableItems(status, config)).toBeNull();
+	});
+
+	it("returns conflicts when present", () => {
+		const status: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 0,
+			hasConflicts: true,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+		};
+		const result = formatActionableItems(status, config);
+		expect(result).toContain("Merge conflicts detected");
+	});
+
+	it("returns failing CI when present", () => {
+		const status: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: ["ci/test", "ci/lint"],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+		};
+		const result = formatActionableItems(status, config);
+		expect(result).toContain("Failing CI checks");
+		expect(result).toContain("ci/test");
+		expect(result).toContain("ci/lint");
+	});
+
+	it("returns unresolved threads when present", () => {
+		const status: PRStatus = {
+			unresolvedThreads: 3,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+		};
+		const result = formatActionableItems(status, config);
+		expect(result).toContain("3 unresolved review thread(s)");
+	});
+
+	it("returns general comments when present", () => {
+		const status: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 2,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+		};
+		const result = formatActionableItems(status, config);
+		expect(result).toContain("2 general comment(s)");
+	});
+
+	it("does not include pending CI (not actionable)", () => {
+		const status: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: ["ci/build"],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+		};
+		expect(formatActionableItems(status, config)).toBeNull();
+	});
+
+	it("does not include all-clear message", () => {
+		const status: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+		};
+		expect(formatActionableItems(status, config)).toBeNull();
+	});
+
+	it("returns multiple actionable items combined", () => {
+		const status: PRStatus = {
+			unresolvedThreads: 2,
+			generalComments: 1,
+			hasConflicts: true,
+			failingChecks: ["ci/test"],
+			pendingChecks: ["ci/build"],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+		};
+		const result = formatActionableItems(status, config);
+		expect(result).toContain("Merge conflicts detected");
+		expect(result).toContain("Failing CI checks");
+		expect(result).toContain("2 unresolved review thread(s)");
+		expect(result).toContain("1 general comment(s)");
+		expect(result).not.toContain("pending");
 	});
 });

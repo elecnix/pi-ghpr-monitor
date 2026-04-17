@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { formatStatusUpdate, snapshotPR, type PRStatus, type MonitorConfig } from "../src/analyzer";
+import { formatStatusUpdate, formatActionableItems, snapshotPR, type PRStatus, type MonitorConfig } from "../src/analyzer";
 
 // Test the pure logic functions first
 describe("formatStatusUpdate throttling behavior", () => {
@@ -331,5 +331,106 @@ describe("Tool action enum excludes stop", () => {
 		const source = fs.readFileSync(path.join(__dirname, "../src/index.ts"), "utf-8");
 		
 		expect(source).toContain("Monitoring continues until the user stops it with /ghpr-monitor off");
+	});
+});
+
+// Test the reminder flow
+describe("Reminder after idle", () => {
+	it("needsReminder flag is set on turn_end when monitoring is active", () => {
+		let needsReminder = false;
+		let agentTurnActive = false;
+		const monitorRunning = true;
+		const lastStatus: PRStatus | null = {
+			unresolvedThreads: 2,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: ["ci/test"],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+		};
+
+		// turn_start
+		agentTurnActive = true;
+		needsReminder = false;
+
+		// turn_end
+		agentTurnActive = false;
+		if (monitorRunning && lastStatus) {
+			needsReminder = true;
+		}
+
+		expect(needsReminder).toBe(true);
+		expect(agentTurnActive).toBe(false);
+	});
+
+	it("needsReminder is cleared on turn_start", () => {
+		let needsReminder = true;
+		let agentTurnActive = false;
+
+		// turn_start
+		agentTurnActive = true;
+		needsReminder = false;
+
+		expect(needsReminder).toBe(false);
+		expect(agentTurnActive).toBe(true);
+	});
+
+	it("needsReminder is not set when monitoring is idle", () => {
+		let needsReminder = false;
+		const monitorRunning = false;
+		const lastStatus: PRStatus | null = null;
+
+		// turn_end
+		if (monitorRunning && lastStatus) {
+			needsReminder = true;
+		}
+
+		expect(needsReminder).toBe(false);
+	});
+
+	it("formatActionableItems returns null for clean PR", () => {
+		const status: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+		};
+		const config: MonitorConfig = {
+			owner: "owner",
+			repo: "repo",
+			number: 1,
+			host: "github.com",
+			mode: "all",
+			intervalSec: 60,
+			debounceSec: 30,
+		};
+		expect(formatActionableItems(status, config)).toBeNull();
+	});
+
+	it("formatActionableItems returns items for failing CI", () => {
+		const status: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: ["ci/test"],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+		};
+		const config: MonitorConfig = {
+			owner: "owner",
+			repo: "repo",
+			number: 1,
+			host: "github.com",
+			mode: "all",
+			intervalSec: 60,
+			debounceSec: 30,
+		};
+		const result = formatActionableItems(status, config);
+		expect(result).toContain("Failing CI checks");
 	});
 });

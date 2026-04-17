@@ -17,6 +17,7 @@ import {
 	type PRStatus,
 	type MonitorConfig,
 	snapshotPR,
+	formatActionableItems,
 	formatStatusUpdate,
 } from "./analyzer";
 
@@ -197,6 +198,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	let agentTurnActive = false;
 	let queuedUpdate: string | null = null;
 	let lastSentUpdate: string | null = null;
+	let needsReminder = false;
 
 	// For testing: allows pointing at a mock server
 	let mockBaseUrl: string | undefined;
@@ -214,6 +216,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	// Track agent turn state to avoid spamming updates while LLM is working
 	pi.on("turn_start", () => {
 		agentTurnActive = true;
+		needsReminder = false;
 	});
 
 	pi.on("turn_end", () => {
@@ -224,6 +227,10 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			queuedUpdate = null;
 			pi.sendUserMessage(update, {deliverAs: "steer"});
 			lastSentUpdate = update;
+		}
+		// Schedule a reminder on next poll if actionable items remain
+		if (monitorState.status === "running" && lastStatus) {
+			needsReminder = true;
 		}
 	});
 
@@ -258,9 +265,12 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			const config = monitorState.config;
 			monitorState = { status: "idle" };
 			lastStatus = null;
+			needsReminder = false;
 			return `Stopped monitoring ${config.owner}/${config.repo}#${config.number}`;
 		}
 		monitorState = { status: "idle" };
+		lastStatus = null;
+		needsReminder = false;
 		lastStatus = null;
 		return "No monitor running";
 	}
@@ -292,6 +302,15 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 						pi.sendUserMessage(update, {deliverAs: "steer"});
 						lastSentUpdate = update;
 					}
+				}
+
+				// If agent just went idle and actionable items remain, send a reminder
+				if (needsReminder && !agentTurnActive) {
+					const reminder = formatActionableItems(curr, config);
+					if (reminder) {
+						pi.sendUserMessage(reminder, {deliverAs: "steer"});
+					}
+					needsReminder = false;
 				}
 
 				lastStatus = curr;
