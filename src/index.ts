@@ -201,6 +201,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	let queuedUpdate: string | null = null;
 	let lastSentUpdate: string | null = null;
 	let needsReminder = false;
+	let backoffSec = 0;
+	const MAX_BACKOFF_SEC = 300; // 5 minutes max backoff
 
 	// For testing: allows pointing at a mock server
 	let mockBaseUrl: string | undefined;
@@ -327,19 +329,30 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				}
 
 				lastStatus = curr;
+				backoffSec = 0;
 			} catch (err) {
 				if (signal.aborted) return;
-				const msg = `Poll error for ${config.owner}/${config.repo}#${config.number}: ${err instanceof Error ? err.message : String(err)}`;
-				pi.sendMessage({
-					customType: "ghpr-monitor-error",
-					content: msg,
-					display: true,
-				});
-			}
+				const errMsg = err instanceof Error ? err.message : String(err);
+				const isRateLimit = /rate limit/i.test(errMsg);
+				if (isRateLimit) {
+					backoffSec = backoffSec === 0 ? config.intervalSec : Math.min(backoffSec * 2, MAX_BACKOFF_SEC);
+					pi.sendMessage({
+						customType: "ghpr-monitor-error",
+						content: `Rate limited, backing off ${backoffSec}s`,
+						display: true,
+					});
+				} else {
+					pi.sendMessage({
+						customType: "ghpr-monitor-error",
+						content: `Poll error for ${config.owner}/${config.repo}#${config.number}: ${errMsg}`,
+						display: true,
+					});
+				}
 
-			// Wait for interval (abortable)
+			// Wait for interval (abortable), with backoff after rate limits
+			const waitSec = backoffSec > 0 ? backoffSec : config.intervalSec;
 			await new Promise<void>((resolve) => {
-				const timer = setTimeout(resolve, config.intervalSec * 1000);
+				const timer = setTimeout(resolve, waitSec * 1000);
 				signal.addEventListener(
 					"abort",
 					() => {
