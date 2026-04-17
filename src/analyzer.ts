@@ -252,11 +252,6 @@ export function formatStatusUpdate(prev: PRStatus | null, curr: PRStatus, config
 		}
 	}
 
-	if (curr.pendingChecks.length > 0) {
-		if (!prev || prev.pendingChecks.length !== curr.pendingChecks.length) {
-			lines.push(`⏳ CI checks still pending on ${prLabel}: ${curr.pendingChecks.join(", ")}`);
-		}
-	}
 
 	if (curr.unresolvedThreads > 0) {
 		const prevCount = prev?.unresolvedThreads ?? 0;

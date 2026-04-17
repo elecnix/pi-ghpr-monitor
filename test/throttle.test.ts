@@ -57,7 +57,7 @@ describe("formatStatusUpdate throttling behavior", () => {
 		expect(result).toContain("Failing CI checks");
 	});
 
-	it("returns empty string when only pending checks change count", () => {
+	it("does not send update when only pending checks change", () => {
 		const prev: PRStatus = {
 			unresolvedThreads: 0,
 			generalComments: 0,
@@ -71,10 +71,9 @@ describe("formatStatusUpdate throttling behavior", () => {
 			...prev,
 			pendingChecks: ["ci/a", "ci/b", "ci/c"],
 		};
-		// formatStatusUpdate doesn't return empty for pending check count changes
-		// unless the previous was also pending
+		// Pending CI is not actionable — no update sent
 		const result = formatStatusUpdate(prev, curr, config);
-		expect(result).toContain("⏳");
+		expect(result).toBe("");
 	});
 
 	it("reports failing checks when they appear", () => {

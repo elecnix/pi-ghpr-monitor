@@ -258,7 +258,7 @@ describe("formatStatusUpdate", () => {
 		expect(update).toContain("new unresolved review thread");
 	});
 
-	it("reports pending checks on first status", () => {
+	it("does not report pending checks (not actionable)", () => {
 		const curr: PRStatus = {
 			unresolvedThreads: 0,
 			generalComments: 0,
@@ -269,7 +269,7 @@ describe("formatStatusUpdate", () => {
 			lastCommentBySelf: false,
 		};
 		const update = formatStatusUpdate(null, curr, config);
-		expect(update).toContain("pending");
+		expect(update).not.toContain("pending");
 	});
 });
 describe("formatActionableItems", () => {
