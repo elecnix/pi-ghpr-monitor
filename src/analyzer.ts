@@ -296,13 +296,14 @@ export function formatStatusUpdate(prev: PRStatus | null, curr: PRStatus, config
 		lines.push(`✅ All CI checks passed on ${prLabel}`);
 	}
 
-	// No issues at all
+	// No issues at all — only when first seen or transitioning from issues
 	if (
 		!curr.hasConflicts &&
 		curr.unresolvedThreads === 0 &&
 		curr.generalComments === 0 &&
 		curr.failingChecks.length === 0 &&
-		curr.pendingChecks.length === 0
+		curr.pendingChecks.length === 0 &&
+		(!prev || prev.hasConflicts || prev.unresolvedThreads > 0 || prev.generalComments > 0 || prev.failingChecks.length > 0 || prev.pendingChecks.length > 0)
 	) {
 		lines.push(`✨ ${prLabel} — no issues, all clear`);
 	}

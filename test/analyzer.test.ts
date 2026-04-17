@@ -612,3 +612,63 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 		expect(status.commentDetails[0].id).toBe("c-1");
 	});
 });
+
+describe("formatStatusUpdate does not repeat all-clear on unchanged status", () => {
+	const config: MonitorConfig = {
+		owner: "o", repo: "r", number: 1,
+		host: "github.com", mode: "all", intervalSec: 60, debounceSec: 30,
+	};
+
+	it("sends all-clear on first poll (prev=null)", () => {
+		const clean: PRStatus = {
+			unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
+			failingChecks: [], pendingChecks: [],
+			lastCommentTimestamp: "", lastCommentBySelf: false,
+			threadDetails: [], commentDetails: [], checkDetails: [],
+		};
+		const result = formatStatusUpdate(null, clean, config);
+		expect(result).toContain("no issues");
+	});
+
+	it("sends all-clear when transitioning from issues to clean", () => {
+		const hadIssues: PRStatus = {
+			unresolvedThreads: 1, generalComments: 0, hasConflicts: false,
+			failingChecks: ["ci/test"], pendingChecks: [],
+			lastCommentTimestamp: "", lastCommentBySelf: false,
+			threadDetails: [], commentDetails: [],
+			checkDetails: [{ name: "ci/test", conclusion: "FAILURE" }],
+		};
+		const clean: PRStatus = {
+			unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
+			failingChecks: [], pendingChecks: [],
+			lastCommentTimestamp: "", lastCommentBySelf: false,
+			threadDetails: [], commentDetails: [], checkDetails: [],
+		};
+		const result = formatStatusUpdate(hadIssues, clean, config);
+		expect(result).toContain("no issues");
+	});
+
+	it("does NOT send all-clear again when status is unchanged clean", () => {
+		const clean: PRStatus = {
+			unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
+			failingChecks: [], pendingChecks: [],
+			lastCommentTimestamp: "", lastCommentBySelf: false,
+			threadDetails: [], commentDetails: [], checkDetails: [],
+		};
+		const result = formatStatusUpdate(clean, clean, config);
+		expect(result).toBe("");
+	});
+
+	it("does NOT send all-clear on second poll with same clean state", () => {
+		const clean: PRStatus = {
+			unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
+			failingChecks: [], pendingChecks: [],
+			lastCommentTimestamp: "", lastCommentBySelf: false,
+			threadDetails: [], commentDetails: [], checkDetails: [],
+		};
+		const first = formatStatusUpdate(null, clean, config);
+		expect(first).toContain("no issues");
+		const second = formatStatusUpdate(clean, clean, config);
+		expect(second).toBe("");
+	});
+});

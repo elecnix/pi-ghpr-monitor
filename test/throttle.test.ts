@@ -22,7 +22,7 @@ describe("formatStatusUpdate throttling behavior", () => {
 		debounceSec: 30,
 	};
 
-	it("returns 'all clear' message when no issues and prev was also clear", () => {
+	it("does NOT repeat all-clear when status is unchanged clean", () => {
 		const prev: PRStatus = {
 			unresolvedThreads: 0,
 			generalComments: 0,
@@ -33,9 +33,9 @@ describe("formatStatusUpdate throttling behavior", () => {
 			lastCommentBySelf: false,
 		};
 		const curr = { ...prev };
-		// formatStatusUpdate returns "no issues" message when everything is clear
+		// When prev and curr are both clean, nothing changed — should return empty string
 		const result = formatStatusUpdate(prev, curr, config);
-		expect(result).toContain("no issues");
+		expect(result).toBe("");
 	});
 
 	it("reports failing checks when prev had none", () => {
