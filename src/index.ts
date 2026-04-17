@@ -40,7 +40,7 @@ const AWAIT_QUERY = `query AwaitPR(
       state
       merged
       comments(first: $firstComments) {
-        nodes { id body author { login } createdAt reactions(first: 100) { nodes { content } } }
+        nodes { id body author { login } createdAt reactions(content: THUMBS_UP, first: 1) { nodes { content } } }
         pageInfo { hasNextPage endCursor }
       }
       reviewThreads(first: $firstThreads) {
@@ -49,7 +49,7 @@ const AWAIT_QUERY = `query AwaitPR(
           isResolved
           isOutdated
           comments(first: $firstReviewComments) {
-            nodes { id body author { login } createdAt reactions(first: 100) { nodes { content } } }
+            nodes { id body author { login } createdAt reactions(content: THUMBS_UP, first: 1) { nodes { content } } }
             pageInfo { hasNextPage endCursor }
           }
         }
@@ -330,7 +330,11 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			} catch (err) {
 				if (signal.aborted) return;
 				const msg = `Poll error for ${config.owner}/${config.repo}#${config.number}: ${err instanceof Error ? err.message : String(err)}`;
-				pi.sendUserMessage(msg, {deliverAs: "steer"});
+				pi.sendMessage({
+					customType: "ghpr-monitor-error",
+					content: msg,
+					display: true,
+				});
 			}
 
 			// Wait for interval (abortable)
