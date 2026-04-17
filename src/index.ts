@@ -276,7 +276,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 							number: config.number,
 							status: curr,
 						},
-					});
+					}, {deliverAs: "steer"});
 				}
 
 				lastStatus = curr;
@@ -286,7 +286,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					customType: "ghpr-monitor-error",
 					content: `Poll error for ${config.owner}/${config.repo}#${config.number}: ${err instanceof Error ? err.message : String(err)}`,
 					display: true,
-				});
+				}, {deliverAs: "steer"});
 			}
 
 			// Wait for interval (abortable)
