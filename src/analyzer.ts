@@ -268,7 +268,7 @@ export function formatStatusUpdate(prev: PRStatus | null, curr: PRStatus, config
 		}
 		if (threadLines) {
 			lines.push(threadLines);
-			lines.push("  Add a 👍 reaction to a comment to stop monitoring it.");
+			lines.push("  Add a 👍 reaction to a comment to acknowledge it and stop notifications.");
 		}
 	}
 
@@ -282,7 +282,7 @@ export function formatStatusUpdate(prev: PRStatus | null, curr: PRStatus, config
 		}
 		if (commentLines) {
 			lines.push(commentLines);
-			lines.push("  Add a 👍 reaction to a comment to stop monitoring it.");
+			lines.push("  Add a 👍 reaction to a comment to acknowledge it and stop notifications.");
 		}
 	}
 
@@ -369,7 +369,7 @@ export function formatActionableItems(status: PRStatus, config: MonitorConfig): 
 		const threadLines = formatThreadDetails(status.threadDetails ?? []);
 		if (threadLines) {
 			lines.push(threadLines);
-			lines.push("  Add a 👍 reaction to a comment to stop monitoring it.");
+			lines.push("  Add a 👍 reaction to a comment to acknowledge it and stop notifications.");
 		}
 	}
 
@@ -378,7 +378,7 @@ export function formatActionableItems(status: PRStatus, config: MonitorConfig): 
 		const commentLines = formatCommentDetails(status.commentDetails ?? []);
 		if (commentLines) {
 			lines.push(commentLines);
-			lines.push("  Add a 👍 reaction to a comment to stop monitoring it.");
+			lines.push("  Add a 👍 reaction to a comment to acknowledge it and stop notifications.");
 		}
 	}
 
