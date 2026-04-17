@@ -350,7 +350,9 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				}
 
 			// Wait for interval (abortable), with backoff after rate limits
-			const waitSec = backoffSec > 0 ? backoffSec : config.intervalSec;
+			// Slow polling during active turns — no need to poll frequently while the LLM works
+			const normalSec = backoffSec > 0 ? backoffSec : config.intervalSec;
+			const waitSec = agentTurnActive ? Math.max(normalSec, 300) : normalSec;
 			await new Promise<void>((resolve) => {
 				const timer = setTimeout(resolve, waitSec * 1000);
 				signal.addEventListener(
