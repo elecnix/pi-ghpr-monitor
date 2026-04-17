@@ -266,7 +266,10 @@ export function formatStatusUpdate(prev: PRStatus | null, curr: PRStatus, config
 		} else if (!prev) {
 			lines.push(`💬 ${curr.unresolvedThreads} unresolved review thread(s) on ${prLabel}:`);
 		}
-		if (threadLines) lines.push(threadLines);
+		if (threadLines) {
+			lines.push(threadLines);
+			lines.push("  Add a 👍 reaction to a comment to stop monitoring it.");
+		}
 	}
 
 	if (curr.generalComments > 0) {
@@ -277,7 +280,10 @@ export function formatStatusUpdate(prev: PRStatus | null, curr: PRStatus, config
 		} else if (!prev) {
 			lines.push(`📝 ${curr.generalComments} general comment(s) on ${prLabel}:`);
 		}
-		if (commentLines) lines.push(commentLines);
+		if (commentLines) {
+			lines.push(commentLines);
+			lines.push("  Add a 👍 reaction to a comment to stop monitoring it.");
+		}
 	}
 
 	// All checks passed
@@ -361,13 +367,19 @@ export function formatActionableItems(status: PRStatus, config: MonitorConfig): 
 	if (status.unresolvedThreads > 0) {
 		lines.push(`💬 ${status.unresolvedThreads} unresolved review thread(s) on ${prLabel}:`);
 		const threadLines = formatThreadDetails(status.threadDetails ?? []);
-		if (threadLines) lines.push(threadLines);
+		if (threadLines) {
+			lines.push(threadLines);
+			lines.push("  Add a 👍 reaction to a comment to stop monitoring it.");
+		}
 	}
 
 	if (status.generalComments > 0) {
 		lines.push(`📝 ${status.generalComments} general comment(s) on ${prLabel}:`);
 		const commentLines = formatCommentDetails(status.commentDetails ?? []);
-		if (commentLines) lines.push(commentLines);
+		if (commentLines) {
+			lines.push(commentLines);
+			lines.push("  Add a 👍 reaction to a comment to stop monitoring it.");
+		}
 	}
 
 	return lines.length > 0 ? lines.join("\n") : null;
