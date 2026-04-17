@@ -202,7 +202,9 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	let lastSentUpdate: string | null = null;
 	let needsReminder = false;
 	let backoffSec = 0;
-	const MAX_BACKOFF_SEC = 300; // 5 minutes max backoff
+	let consecutiveNoChange = 0;
+	const MAX_BACKOFF_SEC = 300; // 5 minutes max rate-limit backoff
+	const MAX_IDLE_SEC = 3600; // 1 hour max idle polling
 
 	// For testing: allows pointing at a mock server
 	let mockBaseUrl: string | undefined;
@@ -270,11 +272,13 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			monitorState = { status: "idle" };
 			lastStatus = null;
 			needsReminder = false;
+			consecutiveNoChange = 0;
 			return `Stopped monitoring https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
 		}
 		monitorState = { status: "idle" };
 		lastStatus = null;
 		needsReminder = false;
+		consecutiveNoChange = 0;
 		lastStatus = null;
 		return "No monitor running";
 	}
@@ -307,6 +311,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 
 				const curr = snapshotPR(pr);
 				const update = formatStatusUpdate(lastStatus, curr, config);
+				const hadChange = update.length > 0;
 
 				if (update) {
 					if (agentTurnActive) {
@@ -330,6 +335,11 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 
 				lastStatus = curr;
 				backoffSec = 0;
+				if (hadChange) {
+					consecutiveNoChange = 0;
+				} else {
+					consecutiveNoChange++;
+				}
 			} catch (err) {
 				if (signal.aborted) return;
 				const errMsg = err instanceof Error ? err.message : String(err);
@@ -351,8 +361,12 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 
 			// Wait for interval (abortable), with backoff after rate limits
 			// Slow polling during active turns — no need to poll frequently while the LLM works
-			const normalSec = backoffSec > 0 ? backoffSec : config.intervalSec;
-			const waitSec = agentTurnActive ? Math.max(normalSec, 300) : normalSec;
+			const baseSec = backoffSec > 0 ? backoffSec : config.intervalSec;
+			// After 3 consecutive no-change polls, double interval each time up to 1 hour
+			const idleSec = consecutiveNoChange > 3
+				? Math.min(config.intervalSec * Math.pow(2, consecutiveNoChange - 3), MAX_IDLE_SEC)
+				: baseSec;
+			const waitSec = agentTurnActive ? Math.max(idleSec, 300) : idleSec;
 			await new Promise<void>((resolve) => {
 				const timer = setTimeout(resolve, waitSec * 1000);
 				signal.addEventListener(
