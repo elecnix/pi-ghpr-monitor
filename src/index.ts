@@ -159,6 +159,26 @@ async function fetchPRData(config: MonitorConfig, signal?: AbortSignal, mockBase
 }
 
 // ---------------------------------------------------------------------------
+// PR URL parser
+// ---------------------------------------------------------------------------
+
+const PR_URL_RE = /^https?:\/\/([^\/]+)\/([^\/]+)\/([^\/]+)\/pull\/([0-9]+).*$/i;
+
+interface ParsedPR {
+	owner: string;
+	repo: string;
+	number: number;
+	host: string;
+}
+
+function parsePRUrl(input: string): ParsedPR | null {
+	const m = input.trim().match(PR_URL_RE);
+	if (!m) return null;
+	const host = m[1] === "github.com" ? "github.com" : m[1];
+	return { owner: m[2], repo: m[3], number: parseInt(m[4], 10), host };
+}
+
+// ---------------------------------------------------------------------------
 // Monitor state management
 // ---------------------------------------------------------------------------
 
@@ -297,15 +317,16 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			return completions.filter((c) => c.startsWith(prefix)).map((c) => ({ value: c, label: c }));
 		},
 		handler: async (args, ctx) => {
-			const arg = args.trim().toLowerCase();
+			const raw = args.trim();
+			const lower = raw.toLowerCase();
 
-			if (arg === "off" || arg === "stop") {
+			if (lower === "off" || lower === "stop") {
 				const msg = stopMonitor();
 				ctx.ui.notify(msg, "info");
 				return;
 			}
 
-			if (arg === "on" || arg === "") {
+			if (lower === "on" || raw === "") {
 				if (monitorState.status === "running") {
 					ctx.ui.notify(
 						`Already monitoring ${monitorState.config.owner}/${monitorState.config.repo}#${monitorState.config.number}`,
@@ -314,14 +335,31 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					return;
 				}
 				ctx.ui.notify(
-					"Usage: /ghpr-monitor owner/repo <pr-number>\nOr: /ghpr-monitor off — stop monitoring",
+					"Usage:\n  /ghpr-monitor <PR URL>  — paste a GitHub PR URL\n  /ghpr-monitor owner/repo <pr-number>\n  /ghpr-monitor off — stop monitoring",
 					"info",
 				);
 				return;
 			}
 
-			// Parse "owner/repo number"
-			const parts = args.trim().split(/\s+/);
+			// Try parsing as a PR URL first
+			const parsed = parsePRUrl(raw);
+			if (parsed) {
+				const config: MonitorConfig = {
+					owner: parsed.owner,
+					repo: parsed.repo,
+					number: parsed.number,
+					host: parsed.host,
+					mode: "all",
+					intervalSec: 60,
+					debounceSec: 30,
+				};
+				const msg = startMonitor(config);
+				ctx.ui.notify(msg, "success");
+				return;
+			}
+
+			// Try parsing as "owner/repo number"
+			const parts = raw.split(/\s+/);
 			if (parts.length >= 2 && parts[0].includes("/")) {
 				const [ownerRepo, numStr] = [parts[0], parts[1]];
 				const [owner, repo] = ownerRepo.split("/");
@@ -345,7 +383,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			}
 
 			ctx.ui.notify(
-				"Usage:\n  /ghpr-monitor owner/repo <pr-number>  — start monitoring\n  /ghpr-monitor off  — stop monitoring",
+				"Usage:\n  /ghpr-monitor <PR URL>  — paste a GitHub PR URL\n  /ghpr-monitor owner/repo <pr-number>  — start monitoring\n  /ghpr-monitor off  — stop monitoring",
 				"info",
 			);
 		},
@@ -359,6 +397,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		action: StringEnum(["start", "stop", "status"] as const, {
 			description: "Action: start monitoring, stop monitoring, or check status",
 		}),
+		url: Type.Optional(Type.String({ description: "GitHub PR URL (e.g. https://github.com/owner/repo/pull/123). Alternative to owner+repo+pr_number." })),
 		owner: Type.Optional(Type.String({ description: "Repository owner (e.g. 'v2nic')" })),
 		repo: Type.Optional(Type.String({ description: "Repository name (e.g. 'gh-pr-review')" })),
 		pr_number: Type.Optional(Type.Number({ description: "Pull request number" })),
@@ -374,10 +413,11 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		name: "ghpr-monitor",
 		label: "GH PR Monitor",
 		description:
-			"Monitor a GitHub pull request for comments, conflicts, and CI status changes. Use action='start' with owner, repo, and pr_number to begin monitoring. Use action='stop' to stop. Use action='status' to check current monitoring state. Updates are injected as notifications into the session.",
+			"Monitor a GitHub pull request for comments, conflicts, and CI status changes. Use action='start' with a 'url' (GitHub PR URL) or with owner+repo+pr_number to begin monitoring. Use action='stop' to stop. Use action='status' to check current monitoring state. Updates are injected as notifications into the session.",
 		promptSnippet: "Monitor a GitHub PR for changes (comments, conflicts, CI failures)",
 		promptGuidelines: [
 			"When the user asks you to watch or monitor a PR, use ghpr-monitor with action='start'.",
+			"Accept either a GitHub PR URL or separate owner/repo/pr_number.",
 			"When the user wants to stop monitoring, use action='stop'.",
 			"You will receive PR status updates as notifications — address any issues noted.",
 		],
@@ -399,12 +439,36 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 						};
 					}
 
-					if (!params.owner || !params.repo || !params.pr_number) {
+					// Resolve owner/repo/number from url or explicit params
+					let resolvedOwner: string | undefined;
+					let resolvedRepo: string | undefined;
+					let resolvedNumber: number | undefined;
+					let resolvedHost = "github.com";
+
+					if (params.url) {
+						const parsed = parsePRUrl(params.url);
+						if (!parsed) {
+							return {
+								content: [{ type: "text", text: `Invalid PR URL: ${params.url}. Expected format: https://github.com/owner/repo/pull/123` }],
+								details: { action: "start", status: "invalid_url" },
+							};
+						}
+						resolvedOwner = parsed.owner;
+						resolvedRepo = parsed.repo;
+						resolvedNumber = parsed.number;
+						resolvedHost = parsed.host;
+					} else {
+						resolvedOwner = params.owner;
+						resolvedRepo = params.repo;
+						resolvedNumber = params.pr_number;
+					}
+
+					if (!resolvedOwner || !resolvedRepo || !resolvedNumber) {
 						return {
 							content: [
 								{
 									type: "text",
-									text: "Missing required parameters: owner, repo, and pr_number are required for action='start'.",
+									text: "Missing required parameters: provide either 'url' or owner+repo+pr_number for action='start'.",
 								},
 							],
 							details: { action: "start", status: "missing_params" },
@@ -412,10 +476,10 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					}
 
 					const config: MonitorConfig = {
-						owner: params.owner,
-						repo: params.repo,
-						number: params.pr_number,
-						host: "github.com",
+						owner: resolvedOwner,
+						repo: resolvedRepo,
+						number: resolvedNumber,
+						host: resolvedHost,
 						mode: params.mode || "all",
 						intervalSec: Math.max(10, params.interval || 60),
 						debounceSec: 30,

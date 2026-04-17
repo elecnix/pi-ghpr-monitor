@@ -352,11 +352,18 @@ async function main() {
 	captureScreenshot(SESSION, "01-extension-loaded");
 
 	// -------------------------------------------------------------------
-	// SCENARIO 2: Start monitoring via command
+	// SCENARIO 2: Start monitoring via PR URL
 	// -------------------------------------------------------------------
-	console.log("\n📋 Scenario 2: Start monitoring");
-	tmuxSend(SESSION, "echo 'Starting PR monitor for v2nic/gh-pr-review#42'");
-	captureScreenshot(SESSION, "02-start-monitoring");
+	console.log("\n📋 Scenario 2: Start monitoring via PR URL");
+	tmuxSend(SESSION, "echo '/ghpr-monitor https://github.com/v2nic/gh-pr-review/pull/42'");
+	captureScreenshot(SESSION, "02-start-monitoring-url");
+
+	// -------------------------------------------------------------------
+	// SCENARIO 3: Start monitoring via owner/repo format
+	// -------------------------------------------------------------------
+	console.log("\n📋 Scenario 3: Start monitoring via owner/repo number");
+	tmuxSend(SESSION, "echo '/ghpr-monitor v2nic/gh-pr-review 42'");
+	captureScreenshot(SESSION, "03-start-monitoring-short");
 
 	// -------------------------------------------------------------------
 	// SCENARIO 3: Initial PR status

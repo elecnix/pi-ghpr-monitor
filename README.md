@@ -32,8 +32,9 @@ Or add to your project's `.pi/settings.json`:
 ### Command: `/ghpr-monitor`
 
 ```
-/ghpr-monitor owner/repo 42    Start monitoring PR #42
-/ghpr-monitor off              Stop monitoring
+/ghpr-monitor https://github.com/owner/repo/pull/42   Paste a PR URL
+/ghpr-monitor owner/repo 42                          Start monitoring PR #42
+/ghpr-monitor off                                    Stop monitoring
 ```
 
 ### Tool: `ghpr-monitor`
@@ -41,6 +42,7 @@ Or add to your project's `.pi/settings.json`:
 The agent can start/stop monitoring itself:
 
 ```
+ghpr-monitor(action="start", url="https://github.com/v2nic/gh-pr-review/pull/42")
 ghpr-monitor(action="start", owner="v2nic", repo="gh-pr-review", pr_number=42)
 ghpr-monitor(action="stop")
 ghpr-monitor(action="status")
@@ -48,7 +50,7 @@ ghpr-monitor(action="status")
 
 ### Typical Workflow
 
-1. You start monitoring: `/ghpr-monitor v2nic/gh-pr-review 42` — or just tell the agent to watch the PR
+1. You start monitoring: `/ghpr-monitor https://github.com/v2nic/gh-pr-review/pull/42` — or just tell the agent to watch the PR
 2. The agent uses the `ghpr-monitor` tool and begins polling
 3. When changes are detected, a notification is injected into the session:
    - **💬 New review comments** — the agent reads and addresses them
@@ -75,7 +77,7 @@ The tool accepts these parameters:
 | Parameter   | Type   | Default | Description                                    |
 |-------------|--------|---------|------------------------------------------------|
 | `action`    | string | —       | `start`, `stop`, or `status`                   |
-| `owner`     | string | —       | Repository owner (required for `start`)        |
+| `url`       | string | —       | GitHub PR URL (alternative to owner+repo+pr_number) |
 | `repo`      | string | —       | Repository name (required for `start`)         |
 | `pr_number` | number | —       | PR number (required for `start`)               |
 | `mode`      | string | `all`   | Watch mode: `all`, `comments`, `conflicts`, `actions` |

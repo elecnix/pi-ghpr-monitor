@@ -12,6 +12,12 @@ This skill provides the `ghpr-monitor` tool and `/ghpr-monitor` command for moni
 ### Start monitoring a PR
 
 ```
+/ghpr-monitor https://github.com/v2nic/gh-pr-review/pull/42
+```
+
+Or with owner/repo format:
+
+```
 /ghpr-monitor v2nic/gh-pr-review 42
 ```
 
