@@ -94,9 +94,9 @@ The agent **cannot** stop monitoring — only `/ghpr-monitor off` can do that. T
    - **⚠️ Merge conflicts** — the agent resolves them
    - **❌ Failing CI checks** — the agent fixes the issues
    - **✅ All checks pass** — the agent confirms it's ready to merge
-   - **🔀 PR merged / ❌ PR closed** — monitoring stops automatically
-4. The agent adds 👍 reactions to dismiss bot comments it doesn't need to act on
-5. You stop monitoring explicitly: `/ghpr-monitor off`
+4. When the PR is merged or closed, monitoring stops automatically (e.g. `🔀 PR https://github.com/owner/repo/pull/42 was merged. Monitoring stopped.`)
+5. The agent adds 👍 reactions to dismiss bot comments it doesn't need to act on
+6. You stop monitoring explicitly: `/ghpr-monitor off`
 
 ## How It Works
 
@@ -148,12 +148,18 @@ pi -e ./src/index.ts
 
 ## Testing
 
-The project includes mock servers for validation testing:
+```bash
+# Unit and throttle tests
+npm test
 
-- **Mock GitHub server** (`test/mock-github-server.ts`) — simulates the GitHub GraphQL API
-- **Mock LLM server** (`test/mock-llm-server.ts`) — simulates an OpenAI-compatible API
+# Type check
+npm run typecheck
 
-See [test/README.md](test/README.md) for details on running integration tests.
+# Test locally
+pi -e ./src/index.ts
+```
+
+The project includes unit tests for the analyzer functions, throttling logic, and E2E tests with a mock GitHub server.
 
 ## License
 
