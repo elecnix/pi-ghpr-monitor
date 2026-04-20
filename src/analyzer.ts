@@ -23,8 +23,7 @@ export interface CommentNode {
 export interface ReviewThreadNode {
 	id: string;
 	isResolved: boolean;
-	isOutdated: boolean;
-	comments: { nodes: CommentNode[]; pageInfo: { hasNextPage: boolean; endCursor?: string } };
+	comments: { nodes: CommentNode[] };
 }
 
 export interface CheckRunNode {
@@ -64,8 +63,6 @@ export interface PullRequestData {
 export interface ThreadSummary {
 	id: string;
 	isResolved: boolean;
-	isOutdated: boolean;
-	commentCount: number;
 	lastCommentAuthor: string;
 	lastCommentBody: string;
 }
@@ -191,8 +188,6 @@ export function snapshotPR(pr: PullRequestData): PRStatus {
 			return {
 				id: t.id,
 				isResolved: t.isResolved,
-				isOutdated: t.isOutdated,
-				commentCount: comments.length,
 				lastCommentAuthor: last?.author?.login ?? "",
 				lastCommentBody: last?.body?.slice(0, 120) ?? "",
 			};

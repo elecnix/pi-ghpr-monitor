@@ -36,7 +36,6 @@ function buildGraphQLResponse() {
 		reviewThreadNodes.push({
 			id: `thread-${i}`,
 			isResolved,
-			isOutdated: false,
 			comments: {
 				nodes: [
 					{
@@ -46,7 +45,6 @@ function buildGraphQLResponse() {
 						createdAt: new Date(Date.now() - (i + 1) * 60000).toISOString(),
 					},
 				],
-				pageInfo: { hasNextPage: false },
 			},
 		});
 	}
@@ -94,8 +92,8 @@ function buildGraphQLResponse() {
 		data: {
 			repository: {
 				pullRequest: {
-					comments: { nodes: commentNodes, pageInfo: { hasNextPage: false } },
-					reviewThreads: { nodes: reviewThreadNodes, pageInfo: { hasNextPage: false } },
+					comments: { nodes: commentNodes },
+					reviewThreads: { nodes: reviewThreadNodes },
 					mergeable: state.hasConflicts ? "CONFLICTING" : "MERGEABLE",
 					mergeStateStatus: state.hasConflicts ? "DIRTY" : "CLEAN",
 					commits: {

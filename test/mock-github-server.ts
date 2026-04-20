@@ -52,7 +52,6 @@ function buildGraphQLResponse(state: MockPRState): object {
 		reviewThreadNodes.push({
 			id: `thread-${i}`,
 			isResolved,
-			isOutdated: false,
 			comments: {
 				nodes: [
 					{
@@ -63,7 +62,6 @@ function buildGraphQLResponse(state: MockPRState): object {
 						reactions: { nodes: [] },
 					},
 				],
-				pageInfo: { hasNextPage: false },
 			},
 		});
 	}
@@ -120,11 +118,9 @@ function buildGraphQLResponse(state: MockPRState): object {
 				pullRequest: {
 					comments: {
 						nodes: commentNodes,
-						pageInfo: { hasNextPage: false },
 					},
 					reviewThreads: {
 						nodes: reviewThreadNodes,
-						pageInfo: { hasNextPage: false },
 					},
 					mergeable: state.hasConflicts ? "CONFLICTING" : "MERGEABLE",
 					mergeStateStatus: state.hasConflicts ? "DIRTY" : "CLEAN",

@@ -40,9 +40,9 @@ describe("countUnresolvedThreads", () => {
 		const pr = makeMockPR({
 			reviewThreads: {
 				nodes: [
-					{ id: "1", isResolved: false, isOutdated: false, comments: { nodes: [], pageInfo: { hasNextPage: false } } },
-					{ id: "2", isResolved: true, isOutdated: false, comments: { nodes: [], pageInfo: { hasNextPage: false } } },
-					{ id: "3", isResolved: false, isOutdated: false, comments: { nodes: [], pageInfo: { hasNextPage: false } } },
+					{ id: "1", isResolved: false, comments: { nodes: [] } },
+					{ id: "2", isResolved: true, comments: { nodes: [] } },
+					{ id: "3", isResolved: false, comments: { nodes: [] } },
 				],
 			},
 		});
@@ -420,8 +420,8 @@ describe("formatStatusUpdate with detail", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			threadDetails: [
-				{ id: "PRRT_1", isResolved: false, isOutdated: false, commentCount: 1, lastCommentAuthor: "reviewer", lastCommentBody: "Please fix this typo" },
-				{ id: "PRRT_2", isResolved: false, isOutdated: false, commentCount: 1, lastCommentAuthor: "bot", lastCommentBody: "Build failed" },
+				{ id: "PRRT_1", isResolved: false, lastCommentAuthor: "reviewer", lastCommentBody: "Please fix this typo" },
+				{ id: "PRRT_2", isResolved: false, lastCommentAuthor: "bot", lastCommentBody: "Build failed" },
 			],
 			commentDetails: [],
 			checkDetails: [],
@@ -537,23 +537,19 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 					{
 						id: "t-1",
 						isResolved: false,
-						isOutdated: false,
 						comments: {
 							nodes: [
 								{ id: "tc-1", body: "Fix this", author: { login: "reviewer" }, createdAt: "2024-01-01T00:00:00Z", reactions: { nodes: [] } },
 							],
-							pageInfo: { hasNextPage: false },
 						},
 					},
 					{
 						id: "t-2",
 						isResolved: false,
-						isOutdated: false,
 						comments: {
 							nodes: [
 								{ id: "tc-2", body: "Looks good now", author: { login: "dev" }, createdAt: "2024-01-01T00:01:00Z", reactions: { nodes: [{ content: "THUMBS_UP" }] } },
 							],
-							pageInfo: { hasNextPage: false },
 						},
 					},
 				],

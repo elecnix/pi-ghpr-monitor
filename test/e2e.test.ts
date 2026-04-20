@@ -36,7 +36,6 @@ function buildResponse() {
 		reviewThreadNodes.push({
 			id: `thread-${i}`,
 			isResolved,
-			isOutdated: false,
 			comments: {
 				nodes: [
 					{
@@ -47,7 +46,6 @@ function buildResponse() {
 						reactions: { nodes: [] as ReactionNode[] },
 					},
 				],
-				pageInfo: { hasNextPage: false },
 			},
 		});
 	}

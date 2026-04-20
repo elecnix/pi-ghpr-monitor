@@ -29,44 +29,40 @@ const AWAIT_QUERY = `query AwaitPR(
   $owner: String!,
   $repo: String!,
   $number: Int!,
-  $firstComments: Int!,
-  $firstThreads: Int!,
-  $firstReviewComments: Int!,
-  $firstCheckSuites: Int!,
-  $firstChecks: Int!
+  $lastComments: Int!,
+  $lastThreads: Int!,
+  $lastThreadComments: Int!,
+  $lastCheckSuites: Int!,
+  $lastCheckRuns: Int!
 ) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       state
       merged
-      comments(first: $firstComments) {
+      comments(last: $lastComments) {
         nodes { id body author { login } createdAt reactions(content: THUMBS_UP, first: 1) { nodes { content } } }
-        pageInfo { hasNextPage endCursor }
       }
-      reviewThreads(first: $firstThreads) {
+      reviewThreads(last: $lastThreads) {
         nodes {
           id
           isResolved
-          isOutdated
-          comments(first: $firstReviewComments) {
+          comments(last: $lastThreadComments) {
             nodes { id body author { login } createdAt reactions(content: THUMBS_UP, first: 1) { nodes { content } } }
-            pageInfo { hasNextPage endCursor }
           }
         }
-        pageInfo { hasNextPage endCursor }
       }
       mergeable
       mergeStateStatus
       commits(last: 1) {
         nodes {
           commit {
-            checkSuites(first: $firstCheckSuites) {
+            checkSuites(last: $lastCheckSuites) {
               nodes {
                 id
                 conclusion
                 status
                 app { name slug }
-                checkRuns(first: $firstChecks) {
+                checkRuns(last: $lastCheckRuns) {
                   nodes {
                     name
                     conclusion
@@ -142,11 +138,11 @@ async function fetchPRData(config: MonitorConfig, signal?: AbortSignal, mockBase
 		owner: config.owner,
 		repo: config.repo,
 		number: config.number,
-		firstComments: 100,
-		firstThreads: 100,
-		firstReviewComments: 100,
-		firstCheckSuites: 100,
-		firstChecks: 100,
+		lastComments: 25,
+		lastThreads: 25,
+		lastThreadComments: 1,
+		lastCheckSuites: 10,
+		lastCheckRuns: 10,
 	};
 	const raw = await ghGraphQL(
 		AWAIT_QUERY,
