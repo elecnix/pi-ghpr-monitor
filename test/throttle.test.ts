@@ -433,3 +433,129 @@ describe("Reminder after idle", () => {
 		expect(result).toContain("Failing CI checks");
 	});
 });
+
+// Test poll error recovery behavior
+// Simulates the backoff state machine from the pollLoop catch block
+describe("Poll error recovery and backoff", () => {
+	const INTERVAL_SEC = 60;
+	const MAX_BACKOFF_SEC = 300;
+
+	function createBackoffSimulator() {
+		let backoffSec = 0;
+		const messages: { type: string; content: string }[] = [];
+
+		return {
+			getBackoffSec: () => backoffSec,
+			getMessages: () => messages,
+
+			// Simulate a successful poll
+			onSuccess() {
+				backoffSec = 0;
+			},
+
+			// Simulate an error poll (matches the logic in pollLoop)
+			onError(errorMsg: string) {
+				const isRateLimit = /rate limit/i.test(errorMsg);
+				backoffSec = backoffSec === 0
+					? INTERVAL_SEC
+					: Math.min(backoffSec * 2, MAX_BACKOFF_SEC);
+				messages.push({
+					type: isRateLimit ? "rate-limit" : "poll-error",
+					content: isRateLimit
+						? `Rate limited, backing off ${backoffSec}s`
+						: `${errorMsg}${backoffSec > INTERVAL_SEC ? ` (retrying in ${backoffSec}s)` : ""}`,
+				});
+			},
+
+			// Compute the wait time (matches pollLoop logic)
+			getWaitSec(): number {
+				return backoffSec > 0 ? backoffSec : INTERVAL_SEC;
+			},
+		};
+	}
+
+	it("starts backoff at intervalSec on first error", () => {
+		const sim = createBackoffSimulator();
+		sim.onError("error connecting to api.github.com");
+		expect(sim.getBackoffSec()).toBe(INTERVAL_SEC);
+		expect(sim.getWaitSec()).toBe(INTERVAL_SEC);
+	});
+
+	it("doubles backoff on consecutive errors", () => {
+		const sim = createBackoffSimulator();
+		sim.onError("error connecting to api.github.com");
+		expect(sim.getBackoffSec()).toBe(60);
+
+		sim.onError("error connecting to api.github.com");
+		expect(sim.getBackoffSec()).toBe(120);
+
+		sim.onError("error connecting to api.github.com");
+		expect(sim.getBackoffSec()).toBe(240);
+
+		sim.onError("error connecting to api.github.com");
+		expect(sim.getBackoffSec()).toBe(300); // capped at MAX_BACKOFF_SEC
+
+		sim.onError("error connecting to api.github.com");
+		expect(sim.getBackoffSec()).toBe(300); // still capped
+	});
+
+	it("resets backoff after successful poll", () => {
+		const sim = createBackoffSimulator();
+		sim.onError("error connecting to api.github.com");
+		sim.onError("error connecting to api.github.com");
+		expect(sim.getBackoffSec()).toBe(120);
+
+		sim.onSuccess();
+		expect(sim.getBackoffSec()).toBe(0);
+		expect(sim.getWaitSec()).toBe(INTERVAL_SEC);
+	});
+
+	it("recovers from error after connectivity returns", () => {
+		const sim = createBackoffSimulator();
+		// Simulate a network outage: 4 consecutive errors
+		sim.onError("error connecting to api.github.com");
+		sim.onError("error connecting to api.github.com");
+		sim.onError("error connecting to api.github.com");
+		sim.onError("error connecting to api.github.com");
+		expect(sim.getBackoffSec()).toBe(300);
+		expect(sim.getMessages().length).toBe(4);
+		expect(sim.getMessages()[3].content).toContain("retrying in 300s");
+
+		// Network recovers
+		sim.onSuccess();
+		expect(sim.getBackoffSec()).toBe(0);
+		expect(sim.getWaitSec()).toBe(INTERVAL_SEC);
+	});
+
+	it("does NOT stop the monitor on errors (error is caught, loop continues)", () => {
+		const sim = createBackoffSimulator();
+		sim.onError("error connecting to api.github.com");
+		// The monitor is still alive — the error was caught and backoff was applied
+		// The loop continues to the wait phase
+		const waitSec = sim.getWaitSec();
+		expect(waitSec).toBeGreaterThan(0); // It will wait before next poll
+		expect(sim.getBackoffSec()).toBe(INTERVAL_SEC); // But it hasn't stopped
+	});
+
+	it("applies backoff to rate limit errors equally", () => {
+		const sim = createBackoffSimulator();
+		sim.onError("rate limit exceeded");
+		expect(sim.getBackoffSec()).toBe(INTERVAL_SEC);
+		expect(sim.getMessages()[0].type).toBe("rate-limit");
+
+		sim.onError("rate limit exceeded");
+		expect(sim.getBackoffSec()).toBe(120);
+
+		sim.onSuccess();
+		expect(sim.getBackoffSec()).toBe(0);
+	});
+
+	it("shows retry time in error message after first backoff", () => {
+		const sim = createBackoffSimulator();
+		sim.onError("error connecting to api.github.com");
+		expect(sim.getMessages()[0].content).not.toContain("retrying in"); // first error, no backoff label yet
+
+		sim.onError("error connecting to api.github.com");
+		expect(sim.getMessages()[1].content).toContain("retrying in 120s");
+	});
+});

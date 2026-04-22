@@ -366,23 +366,20 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				if (signal.aborted) return;
 				const errMsg = err instanceof Error ? err.message : String(err);
 				const isRateLimit = /rate limit/i.test(errMsg);
-				if (isRateLimit) {
-					backoffSec = backoffSec === 0 ? config.intervalSec : Math.min(backoffSec * 2, MAX_BACKOFF_SEC);
-					pi.sendMessage({
-						customType: "ghpr-monitor-error",
-						content: `Rate limited, backing off ${backoffSec}s`,
-						display: true,
-					});
-				} else {
-					pi.sendMessage({
-						customType: "ghpr-monitor-error",
-						content: `Poll error for ${config.owner}/${config.repo}#${config.number}: ${errMsg}`,
-						display: true,
-					});
-				}
+				// Exponential backoff for ALL errors (rate limits, connection failures, etc.)
+				backoffSec = backoffSec === 0
+					? config.intervalSec
+					: Math.min(backoffSec * 2, MAX_BACKOFF_SEC);
+				pi.sendMessage({
+					customType: "ghpr-monitor-error",
+					content: isRateLimit
+						? `Rate limited, backing off ${backoffSec}s`
+						: `Poll error for ${config.owner}/${config.repo}#${config.number}: ${errMsg}${backoffSec > config.intervalSec ? ` (retrying in ${backoffSec}s)` : ""}`,
+					display: true,
+				});
 			}
 
-			// Wait for interval (abortable), with backoff after rate limits
+			// Wait for interval (abortable), with backoff after any error
 			// Slow polling during active turns — no need to poll frequently while the LLM works
 			const baseSec = backoffSec > 0 ? backoffSec : config.intervalSec;
 			// After 3 consecutive no-change polls, double interval each time up to 1 hour
