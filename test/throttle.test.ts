@@ -1090,3 +1090,221 @@ describe("Periodic nudge for idle agent", () => {
 		expect(sim.getSentMessages()[2].type).toBe("nudge");
 	});
 });
+describe("Force check sends current state even when nothing changed", () => {
+	const config: MonitorConfig = {
+		owner: "test", repo: "repo", number: 1,
+		host: "github.com", mode: "all", intervalSec: 60, debounceSec: 30,
+	};
+
+	const withComments: PRStatus = {
+		unresolvedThreads: 2, generalComments: 1, hasConflicts: false,
+		failingChecks: [], pendingChecks: [],
+		lastCommentTimestamp: "", lastCommentBySelf: false,
+		threadDetails: [], commentDetails: [], checkDetails: [],
+	};
+
+	function createCheckSim() {
+		let lastSentUpdate: string | null = null;
+		let lastSentReminder: string | null = null;
+		let lastNudgeTime = 0;
+		let lastStatus: PRStatus | null = null;
+		let agentTurnActive = false;
+		let needsReminder = false;
+		let forceNotify = false;
+		let now = 1000000;
+		const sentMessages: { type: string; content: string }[] = [];
+
+		return {
+			getSentMessages: () => sentMessages,
+			advanceTime(ms: number) { now += ms; },
+			turnStart() { agentTurnActive = true; needsReminder = false; },
+			turnEnd() {
+				agentTurnActive = false;
+				needsReminder = true;
+				lastSentReminder = null; // FIX: clear so reminder can re-fire
+			},
+			check() { forceNotify = true; },
+			poll(curr: PRStatus) {
+				const update = formatStatusUpdate(lastStatus, curr, config);
+
+				if (update) {
+					if (agentTurnActive) { /* queue */ }
+					else if (update !== lastSentUpdate) {
+						sentMessages.push({ type: "update", content: update });
+						lastSentUpdate = update;
+						lastSentReminder = null;
+						lastNudgeTime = now;
+					}
+				}
+
+				if (needsReminder && !agentTurnActive) {
+					const reminder = formatActionableItems(curr, config);
+					if (reminder && reminder !== lastSentReminder) {
+						sentMessages.push({ type: "reminder", content: reminder });
+						lastSentReminder = reminder;
+						lastNudgeTime = now;
+					}
+					needsReminder = false;
+				}
+
+				// FIX: force-check always sends current state
+				if (forceNotify && !agentTurnActive) {
+					const items = formatActionableItems(curr, config);
+					const msg = items ?? `✅ No issues found on https://github.com/${config.owner}/${config.repo}/pull/${config.number}`;
+					sentMessages.push({ type: "check", content: msg });
+					lastSentReminder = items;
+					lastNudgeTime = now;
+					forceNotify = false;
+				}
+
+				lastStatus = curr;
+			},
+		};
+	}
+
+	it("sends current state even when nothing changed since last poll", () => {
+		const sim = createCheckSim();
+
+		// First poll discovers comments
+		sim.poll(withComments);
+		expect(sim.getSentMessages()).toHaveLength(1);
+		expect(sim.getSentMessages()[0].type).toBe("update");
+
+		// Subsequent poll — nothing changed
+		sim.advanceTime(60_000);
+		sim.poll(withComments);
+		expect(sim.getSentMessages()).toHaveLength(1); // no duplicate
+
+		// User triggers /ghpr-monitor check
+		sim.check();
+		sim.poll(withComments);
+		expect(sim.getSentMessages()).toHaveLength(2);
+		expect(sim.getSentMessages()[1].type).toBe("check");
+		expect(sim.getSentMessages()[1].content).toContain("unresolved");
+	});
+
+	it("sends all-clear when force-checked on a clean PR", () => {
+		const clean: PRStatus = {
+			unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
+			failingChecks: [], pendingChecks: [],
+			lastCommentTimestamp: "", lastCommentBySelf: false,
+			threadDetails: [], commentDetails: [], checkDetails: [],
+		};
+		const sim = createCheckSim();
+
+		// First poll is clean — sends all-clear
+		sim.poll(clean);
+		expect(sim.getSentMessages()).toHaveLength(1);
+
+		// Nothing changed, normal poll: silent
+		sim.advanceTime(60_000);
+		sim.poll(clean);
+		expect(sim.getSentMessages()).toHaveLength(1);
+
+		// Force check — still sends current state
+		sim.check();
+		sim.poll(clean);
+		expect(sim.getSentMessages()).toHaveLength(2);
+		expect(sim.getSentMessages()[1].type).toBe("check");
+		expect(sim.getSentMessages()[1].content).toContain("No issues");
+	});
+});
+
+describe("Reminder fires after agent processes identical actionable items", () => {
+	const config: MonitorConfig = {
+		owner: "test", repo: "repo", number: 1,
+		host: "github.com", mode: "all", intervalSec: 60, debounceSec: 30,
+	};
+
+	const withThreads: PRStatus = {
+		unresolvedThreads: 2, generalComments: 0, hasConflicts: false,
+		failingChecks: [], pendingChecks: [],
+		lastCommentTimestamp: "", lastCommentBySelf: false,
+		threadDetails: [], commentDetails: [], checkDetails: [],
+	};
+
+	function createReminderSim() {
+		let lastSentUpdate: string | null = null;
+		let lastSentReminder: string | null = null;
+		let lastNudgeTime = 0;
+		let lastStatus: PRStatus | null = null;
+		let agentTurnActive = false;
+		let needsReminder = false;
+		let now = 1000000;
+		const sentMessages: { type: string; content: string }[] = [];
+
+		return {
+			getSentMessages: () => sentMessages,
+			advanceTime(ms: number) { now += ms; },
+			turnStart() { agentTurnActive = true; needsReminder = false; },
+			turnEnd() {
+				agentTurnActive = false;
+				needsReminder = true;
+				lastSentReminder = null; // FIX: clear so reminder can re-fire
+			},
+			poll(curr: PRStatus) {
+				const update = formatStatusUpdate(lastStatus, curr, config);
+
+				if (update) {
+					if (agentTurnActive) { /* queue */ }
+					else if (update !== lastSentUpdate) {
+						sentMessages.push({ type: "update", content: update });
+						lastSentUpdate = update;
+						lastSentReminder = null;
+						lastNudgeTime = now;
+					}
+				}
+
+				if (needsReminder && !agentTurnActive) {
+					const reminder = formatActionableItems(curr, config);
+					if (reminder && reminder !== lastSentReminder) {
+						sentMessages.push({ type: "reminder", content: reminder });
+						lastSentReminder = reminder;
+						lastNudgeTime = now;
+					}
+					needsReminder = false;
+				}
+
+				lastStatus = curr;
+			},
+		};
+	}
+
+	it("sends reminder even when text is identical to previous reminder", () => {
+		const sim = createReminderSim();
+
+		// Poll discovers threads
+		sim.poll(withThreads);
+		expect(sim.getSentMessages()).toHaveLength(1);
+		expect(sim.getSentMessages()[0].type).toBe("update");
+
+		// Agent processes the update but doesn't resolve the threads
+		sim.turnStart();
+		sim.turnEnd();
+
+		// Next poll — needsReminder=true, should send reminder
+		sim.poll(withThreads);
+		expect(sim.getSentMessages()).toHaveLength(2);
+		expect(sim.getSentMessages()[1].type).toBe("reminder");
+
+		// Agent processes reminder but STILL doesn't resolve threads
+		sim.turnStart();
+		sim.turnEnd(); // clears lastSentReminder
+
+		// Next poll — should send reminder AGAIN (this was the bug)
+		sim.poll(withThreads);
+		expect(sim.getSentMessages()).toHaveLength(3);
+		expect(sim.getSentMessages()[2].type).toBe("reminder");
+	});
+
+	it("does NOT send reminder if agent is still active", () => {
+		const sim = createReminderSim();
+
+		sim.poll(withThreads);
+		sim.turnStart();
+		// turn_end hasn't fired yet
+		sim.poll(withThreads);
+		// Only the initial update, no reminder
+		expect(sim.getSentMessages()).toHaveLength(1);
+	});
+});

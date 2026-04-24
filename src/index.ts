@@ -210,6 +210,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	let lastSentUpdate: string | null = null;
 	let lastSentReminder: string | null = null;
 	let needsReminder = false;
+	let forceNotify = false;
 	let backoffSec = 0;
 	let consecutiveNoChange = 0;
 	let lastNudgeTime = 0; // epoch ms of last nudge sent (update or reminder)
@@ -252,6 +253,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		// Schedule a reminder on next poll if actionable items remain
 		if (monitorState.status === "running" && lastStatus) {
 			needsReminder = true;
+			lastSentReminder = null; // clear so reminder can re-fire after each turn
 		}
 		// Wake the poll loop early so the footer updates with latest state
 		if (pollWakeResolve) {
@@ -311,6 +313,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			lastSentReminder = null;
 			lastNudgeTime = 0;
 			needsReminder = false;
+			forceNotify = false;
 			consecutiveNoChange = 0;
 			updateFooter();
 			return `Stopped monitoring https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
@@ -322,6 +325,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		lastSentReminder = null;
 		lastNudgeTime = 0;
 		needsReminder = false;
+		forceNotify = false;
 		consecutiveNoChange = 0;
 		updateFooter();
 		return "No monitor running";
@@ -381,6 +385,17 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 						lastNudgeTime = Date.now();
 					}
 					needsReminder = false;
+				}
+
+				// Force-check: always send current state (triggered by /ghpr-monitor check or tool check action)
+				if (forceNotify && !agentTurnActive) {
+					const prUrl = `https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
+					const items = formatActionableItems(curr, config);
+					const msg = items ?? `\u2705 No issues found on ${prUrl}`;
+					pi.sendUserMessage(msg, {deliverAs: "steer"});
+					lastSentReminder = items;
+					lastNudgeTime = Date.now();
+					forceNotify = false;
 				}
 
 				// Periodic nudge: if the agent has been idle for a while with
@@ -500,6 +515,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				// Reset backoff so the next poll happens at the base interval
 				backoffSec = 0;
 				consecutiveNoChange = 0;
+				forceNotify = true;
 				// Wake the poll loop immediately
 				if (pollWakeResolve) {
 					pollWakeResolve();
@@ -765,6 +781,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					// Reset backoff and wake the poll loop
 					backoffSec = 0;
 					consecutiveNoChange = 0;
+					forceNotify = true;
 					if (pollWakeResolve) {
 						pollWakeResolve();
 						pollWakeResolve = null;
