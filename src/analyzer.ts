@@ -261,7 +261,8 @@ export function formatStatusUpdate(prev: PRStatus | null, curr: PRStatus, config
 		}
 		if (threadLines) {
 			lines.push(threadLines);
-			lines.push("  Workflow: React with 👀 to acknowledge, then either resolve the thread (if addressed) or add 👍 (if non-actionable).");
+			lines.push("  After replying, resolve each thread: gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\"<id>\"}){thread{isResolved}}}'");
+			lines.push("  For non-actionable comments, add 👍 to stop notifications.");
 		}
 	}
 
@@ -364,7 +365,8 @@ export function formatActionableItems(status: PRStatus, config: MonitorConfig): 
 		const threadLines = formatThreadDetails(status.threadDetails ?? []);
 		if (threadLines) {
 			lines.push(threadLines);
-			lines.push("  Workflow: React with 👀 to acknowledge, then either resolve the thread (if addressed) or add 👍 (if non-actionable).");
+			lines.push("  After replying, resolve each thread: gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\"<id>\"}){thread{isResolved}}}'");
+			lines.push("  For non-actionable comments, add 👍 to stop notifications.");
 		}
 	}
 
