@@ -80,37 +80,56 @@ describe("parsePRUrl", () => {
 	});
 });
 describe("parsePRUrl with steer message", () => {
+	// Mirror the logic from index.ts: only treat trailing text as a steer
+	// message if it doesn't start with URL-continuation characters.
+	function extractSteerMessage(raw: string): string | undefined {
+		const m = raw.trim().match(PR_URL_RE);
+		if (!m) return undefined;
+		const afterUrl = raw.trim().slice(m[0].length).trim();
+		return afterUrl && !/^[\/?#]/.test(afterUrl) ? afterUrl : undefined;
+	}
+
 	it("parses URL without trailing message", () => {
-		const url = "https://github.com/owner/repo/pull/42";
-		const m = url.trim().match(PR_URL_RE);
-		expect(m).not.toBeNull();
-		const afterUrl = url.trim().slice(m![0].length).trim();
-		expect(afterUrl).toBe("");
+		expect(extractSteerMessage("https://github.com/owner/repo/pull/42")).toBeUndefined();
 	});
 
 	it("extracts steer message after URL", () => {
-		const url = "https://github.com/owner/repo/pull/42 Address any CI failure";
-		const m = url.trim().match(PR_URL_RE);
-		expect(m).not.toBeNull();
-		const afterUrl = url.trim().slice(m![0].length).trim();
-		expect(afterUrl).toBe("Address any CI failure");
+		expect(extractSteerMessage("https://github.com/owner/repo/pull/42 Address any CI failure")).toBe("Address any CI failure");
 	});
 
 	it("extracts multi-word steer message", () => {
-		const url = "https://github.com/owner/repo/pull/42 You are assigned to finishing the work of this PR";
-		const m = url.trim().match(PR_URL_RE);
-		expect(m).not.toBeNull();
-		const afterUrl = url.trim().slice(m![0].length).trim();
-		expect(afterUrl).toBe("You are assigned to finishing the work of this PR");
+		expect(extractSteerMessage("https://github.com/owner/repo/pull/42 You are assigned to finishing the work of this PR")).toBe("You are assigned to finishing the work of this PR");
 	});
 
-	it("URL with trailing slash has empty steer message", () => {
-		const url = "https://github.com/owner/repo/pull/42/";
-		const m = url.trim().match(PR_URL_RE);
-		expect(m).not.toBeNull();
-		const afterUrl = url.trim().slice(m![0].length).trim();
-		expect(afterUrl).toBe("/");
+	it("URL with trailing slash — not a steer message", () => {
+		expect(extractSteerMessage("https://github.com/owner/repo/pull/42/")).toBeUndefined();
 	});
+
+	it("URL with /changes — not a steer message", () => {
+		expect(extractSteerMessage("https://github.com/mobilityhouse/vgi-na-masscec/pull/412/changes")).toBeUndefined();
+	});
+
+	it("URL with /files — not a steer message", () => {
+		expect(extractSteerMessage("https://github.com/owner/repo/pull/42/files")).toBeUndefined();
+	});
+
+	it("URL with /commits — not a steer message", () => {
+		expect(extractSteerMessage("https://github.com/owner/repo/pull/42/commits")).toBeUndefined();
+	});
+
+	it("URL with /checks — not a steer message", () => {
+		expect(extractSteerMessage("https://github.com/owner/repo/pull/42/checks")).toBeUndefined();
+	});
+
+	it("URL with query params — not a steer message", () => {
+		expect(extractSteerMessage("https://github.com/owner/repo/pull/42?expand=1")).toBeUndefined();
+	});
+
+	it("URL with fragment — not a steer message", () => {
+		expect(extractSteerMessage("https://github.com/owner/repo/pull/42#discussion_r1234")).toBeUndefined();
+	});
+
+
 });
 
 describe("parsePRShorthand", () => {

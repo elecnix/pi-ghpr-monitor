@@ -555,7 +555,11 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			if (parsed) {
 				const urlMatch = raw.trim().match(PR_URL_RE);
 				const afterUrl = urlMatch ? raw.trim().slice(urlMatch[0].length).trim() : "";
-				const steerMessage = afterUrl || undefined;
+				// Only treat trailing text as a steer message if it's NOT a URL
+				// continuation (path segments, query params, fragments).
+				// e.g. "/changes", "/files", "?expand=1", "#discussion_r1"
+				// are part of the GitHub URL, not user messages.
+				const steerMessage = afterUrl && !/^[\/?#]/.test(afterUrl) ? afterUrl : undefined;
 
 				const config: MonitorConfig = {
 					owner: parsed.owner,
