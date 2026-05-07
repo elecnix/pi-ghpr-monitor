@@ -6,35 +6,51 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { initLogger, closeLogger, log, logStatus, getLogPath } from "../src/logger";
+import {
+	setSessionId,
+	enableDebug,
+	disableDebug,
+	isDebugEnabled,
+	closeLogger,
+	log,
+	logStatus,
+	getLogPath,
+} from "../src/logger";
 
 describe("logger", () => {
 	beforeAll(() => {
-		initLogger("test-session-123");
+		setSessionId("test-session-123");
 	});
 
 	afterAll(() => {
 		closeLogger();
-		// Clean up the log file
+		// Clean up any log files
 		const logPath = path.join(os.tmpdir(), "ghpr-monitor-test-session-123.log");
 		if (fs.existsSync(logPath)) {
 			fs.unlinkSync(logPath);
 		}
 	});
 
-	it("creates a log file in the temp directory", () => {
-		const logPath = getLogPath();
-		expect(logPath).toBeTruthy();
-		expect(logPath).toContain(os.tmpdir());
-		expect(logPath).toContain("ghpr-monitor-test-session-123");
+	it("does not log by default", () => {
+		expect(isDebugEnabled()).toBe(false);
+		expect(getLogPath()).toBeNull();
+	});
+
+	it("enableDebug creates a log file and returns the path", () => {
+		const logFilePath = enableDebug();
+		expect(logFilePath).toBeTruthy();
+		expect(logFilePath).toContain(os.tmpdir());
+		expect(logFilePath).toContain("ghpr-monitor-test-session-123");
+		expect(isDebugEnabled()).toBe(true);
 	});
 
 	it("writes log messages to the file", () => {
 		const logPath = getLogPath()!;
 		log("Test message for logging");
-		// WriteStream is async, so we need to ensure it's flushed
-		// For testing, we use stderr output as a proxy
 		expect(logPath).toBeTruthy();
+		// Verify content was written
+		const contents = fs.readFileSync(logPath, "utf-8");
+		expect(contents).toContain("Test message for logging");
 	});
 
 	it("logs PR status snapshots", () => {
@@ -47,33 +63,37 @@ describe("logger", () => {
 			failingStatuses: ["ci/circleci: Build"],
 			pendingStatuses: [],
 		});
-		// Verify the log functions don't throw
-		expect(true).toBe(true);
+		const contents = fs.readFileSync(getLogPath()!, "utf-8");
+		expect(contents).toContain("threads=2");
+		expect(contents).toContain("ci/circleci: Build");
+	});
+
+	it("disableDebug stops logging and returns the log path", () => {
+		const formerPath = disableDebug();
+		expect(formerPath).toBeTruthy();
+		expect(isDebugEnabled()).toBe(false);
+		expect(getLogPath()).toBeNull();
+	});
+
+	it("disableDebug returns null when logging wasn't active", () => {
+		expect(disableDebug()).toBeNull();
 	});
 
 	it("sanitizes session IDs with special characters", () => {
 		closeLogger();
-		initLogger("my/unsafe#session!name");
-		const logPath = getLogPath();
-		// Only the filename should be sanitized, not the directory path
-		const filename = path.basename(logPath!);
+		setSessionId("my/unsafe#session!name");
+		const logFilePath = enableDebug();
+		const filename = path.basename(logFilePath);
 		expect(filename).not.toContain("/");
 		expect(filename).not.toContain("#");
 		expect(filename).not.toContain("!");
 		expect(filename).toContain("my_unsafe_session_name");
-		closeLogger();
+		disableDebug();
 		// Clean up
-		if (logPath && fs.existsSync(logPath)) {
-			fs.unlinkSync(logPath);
+		if (logFilePath && fs.existsSync(logFilePath)) {
+			fs.unlinkSync(logFilePath);
 		}
-		// Re-init for other tests
-		initLogger("test-session-123");
-	});
-
-	it("closes logger gracefully", () => {
-		closeLogger();
-		expect(getLogPath()).toBeNull();
-		// Re-init for afterAll cleanup
-		initLogger("test-session-123");
+		// Reset for other tests
+		setSessionId("test-session-123");
 	});
 });

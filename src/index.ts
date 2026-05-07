@@ -22,7 +22,7 @@ import {
 	formatStatusUpdate,
 	formatFooterStatus,
 } from "./analyzer";
-import { initLogger, closeLogger, log, logPRSnapshot, logStatus, getLogPath } from "./logger";
+import { setSessionId, enableDebug, disableDebug, isDebugEnabled, closeLogger, log, logPRSnapshot, logStatus, getLogPath } from "./logger";
 
 // ---------------------------------------------------------------------------
 // GraphQL query (same as gh-pr-review's AWAIT_QUERY)
@@ -245,12 +245,11 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		};
 	});
 
-	// Initialize logger when session starts
+	// Store session ID for debug logging (activated on demand via /ghpr-monitor debug)
 	pi.on("session_start", async (_event, ctx) => {
 		const sessionFile = ctx.sessionManager.getSessionFile();
-		const sessionId = sessionFile ? path.basename(sessionFile, path.extname(sessionFile)) : `ephemeral-${Date.now()}`;
-		initLogger(sessionId);
-		log(`Session started, log file: ${getLogPath()}`);
+		const id = sessionFile ? path.basename(sessionFile, path.extname(sessionFile)) : `ephemeral-${Date.now()}`;
+		setSessionId(id);
 	});
 
 	// Track agent turn state to avoid spamming updates while LLM is working
@@ -545,9 +544,9 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	// -----------------------------------------------------------------------
 
 	pi.registerCommand("ghpr-monitor", {
-		description: "Monitor a PR: /ghpr-monitor [PR URL] [message] — leave blank to let the agent figure it out, /ghpr-monitor check — check now, /ghpr-monitor off — stop",
+		description: "Monitor a PR: /ghpr-monitor [PR URL] [message] — leave blank to let the agent figure it out, /ghpr-monitor check — check now, /ghpr-monitor debug — toggle debug logging, /ghpr-monitor off — stop",
 		getArgumentCompletions: (prefix: string) => {
-			const completions = ["on", "off", "stop", "check", "https://github.com"];
+			const completions = ["on", "off", "stop", "check", "debug", "https://github.com"];
 			return completions.filter((c) => c.startsWith(prefix)).map((c) => ({ value: c, label: c }));
 		},
 		handler: async (args, ctx) => {
@@ -558,6 +557,22 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			if (lower === "off" || lower === "stop") {
 				const msg = stopMonitor();
 				ctx.ui.notify(msg, "info");
+				return;
+			}
+
+			if (lower === "debug" || lower === "debug on") {
+				const logFilePath = enableDebug();
+				ctx.ui.notify(`Debug logging enabled: ${logFilePath}`, "info");
+				return;
+			}
+
+			if (lower === "debug off") {
+				const formerPath = disableDebug();
+				if (formerPath) {
+					ctx.ui.notify(`Debug logging disabled. Log saved: ${formerPath}`, "info");
+			} else {
+					ctx.ui.notify("Debug logging was not active.", "info");
+				}
 				return;
 			}
 
@@ -671,7 +686,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			}
 
 			ctx.ui.notify(
-				"Usage:\n  /ghpr-monitor <PR URL> [message] — paste a GH PR URL\n  /ghpr-monitor owner/repo#123\n  /ghpr-monitor owner/repo <pr-number> [message]\n  /ghpr-monitor check — check now\n  /ghpr-monitor off — stop monitoring",
+				"Usage:\n  /ghpr-monitor <PR URL> [message] — paste a GH PR URL\n  /ghpr-monitor owner/repo#123\n  /ghpr-monitor owner/repo <pr-number> [message]\n  /ghpr-monitor check — check now\n  /ghpr-monitor debug — enable debug logging\n  /ghpr-monitor debug off — disable debug logging\n  /ghpr-monitor off — stop monitoring",
 				"info",
 			);
 		},

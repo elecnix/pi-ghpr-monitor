@@ -1,7 +1,8 @@
 /**
  * Per-session logger for pi-ghpr-monitor
  *
- * Writes all monitor activity to /tmp/ghpr-monitor-<session-id>.log
+ * Writes monitor activity to /tmp/ghpr-monitor-<session-id>.log when
+ * debug mode is enabled via /ghpr-monitor debug.
  * One log file per PI session. Helps with debugging issues like
  * CI failures not being detected.
  */
@@ -13,20 +14,50 @@ import * as os from "node:os";
 let logStream: fs.WriteStream | null = null;
 let logPath: string | null = null;
 
+/** Stored session ID, captured on session_start for use when debug is activated. */
+let sessionId: string | null = null;
+
 /**
- * Initialize the logger for a session.
- * Creates or appends to a log file in /tmp named after the session.
+ * Store the session ID for later use when debug mode is activated.
+ * Called on session_start, but does NOT start logging.
  */
-export function initLogger(sessionId: string): void {
+export function setSessionId(id: string): void {
+	sessionId = id;
+}
+
+/**
+ * Activate debug logging.
+ * Creates or appends to a log file in /tmp named after the session.
+ * Returns the log file path.
+ */
+export function enableDebug(): string {
 	if (logStream) {
-		closeLogger();
+		// Already logging — just return the path
+		return logPath!;
 	}
+	const id = sessionId ?? `adhoc-${Date.now()}`;
 	// Sanitize session ID for use as filename
-	const safeId = sessionId.replace(/[^a-zA-Z0-9._-]/g, "_");
+	const safeId = id.replace(/[^a-zA-Z0-9._-]/g, "_");
 	logPath = path.join(os.tmpdir(), `ghpr-monitor-${safeId}.log`);
 	logStream = fs.createWriteStream(logPath, { flags: "a", encoding: "utf-8" });
-	log(`=== ghpr-monitor session started: ${new Date().toISOString()} ===`);
+	log(`=== ghpr-monitor debug logging started: ${new Date().toISOString()} ===`);
 	log(`Log file: ${logPath}`);
+	return logPath;
+}
+
+/**
+ * Deactivate debug logging.
+ * Returns the (now former) log file path, or null if logging wasn't active.
+ */
+export function disableDebug(): string | null {
+	const formerPath = logPath;
+	if (logStream) {
+		log(`=== ghpr-monitor debug logging stopped: ${new Date().toISOString()} ===`);
+		logStream.end();
+		logStream = null;
+	}
+	logPath = null;
+	return formerPath;
 }
 
 /**
@@ -42,16 +73,22 @@ export function closeLogger(): void {
 }
 
 /**
+ * Whether debug logging is currently active.
+ */
+export function isDebugEnabled(): boolean {
+	return logStream !== null;
+}
+
+/**
  * Log a message with a timestamp.
- *Messages are written to the log file and also to stderr for debugging.
+ * No-op when debug logging is not enabled.
  */
 export function log(message: string): void {
+	if (!logStream) return;
 	const timestamp = new Date().toISOString();
 	const line = `[${timestamp}] ${message}`;
-	if (logStream) {
-		logStream.write(line + "\n");
-	}
-	// Also write to stderr for visibility during development
+	logStream.write(line + "\n");
+	// Also write to stderr for visibility during debugging
 	process.stderr.write(`[ghpr-monitor] ${line}\n`);
 }
 
@@ -113,7 +150,7 @@ export function logStatus(status: {
 }
 
 /**
- * Get the current log file path, or null if not initialized.
+ * Get the current log file path, or null if debug logging is not active.
  */
 export function getLogPath(): string | null {
 	return logPath;
