@@ -11,6 +11,8 @@ import {
 	hasConflicts,
 	failingChecks,
 	pendingChecks,
+	failingStatuses,
+	pendingStatuses,
 	formatStatusUpdate,
 	formatActionableItems,
 	formatFooterStatus,
@@ -24,6 +26,8 @@ function makeMockPR(overrides: Partial<PullRequestData> = {}): PullRequestData {
 		reviewThreads: { nodes: [] },
 		mergeable: "MERGEABLE",
 		mergeStateStatus: "CLEAN",
+		state: "OPEN",
+		merged: false,
 		commits: {
 			nodes: [] as CommitNode[],
 		},
@@ -132,6 +136,214 @@ describe("pendingChecks", () => {
 			},
 		});
 		expect(pendingChecks(pr)).toContain("ci/test");
+	});
+});
+
+describe("failingStatuses", () => {
+	it("returns empty for no commit statuses", () => {
+		const pr = makeMockPR();
+		expect(failingStatuses(pr)).toEqual([]);
+	});
+
+	it("detects failing commit statuses", () => {
+		const pr = makeMockPR({
+			commits: {
+				nodes: [
+					{
+						commit: {
+							checkSuites: { nodes: [] },
+							status: {
+								state: "FAILURE",
+								contexts: [
+									{ state: "FAILURE", context: "ci/circleci: Build", description: "Your tests failed on CircleCI", targetUrl: "https://circleci.com/gh/org/repo/123" },
+									{ state: "SUCCESS", context: "ci/circleci: lint", description: "Your tests passed on CircleCI!", targetUrl: null },
+								],
+							},
+						},
+					},
+				],
+			},
+		});
+		expect(failingStatuses(pr)).toContain("ci/circleci: Build");
+		expect(failingStatuses(pr).length).toBe(1);
+	});
+
+	it("detects error commit statuses", () => {
+		const pr = makeMockPR({
+			commits: {
+				nodes: [
+					{
+						commit: {
+							checkSuites: { nodes: [] },
+							status: {
+								state: "FAILURE",
+								contexts: [
+									{ state: "ERROR", context: "ci/circleci: deploy", description: "Deploy failed", targetUrl: null },
+								],
+							},
+						},
+					},
+				],
+			},
+		});
+		expect(failingStatuses(pr)).toContain("ci/circleci: deploy");
+	});
+
+	it("returns empty when status is null", () => {
+		const pr = makeMockPR({
+			commits: {
+				nodes: [
+					{
+						commit: {
+							checkSuites: { nodes: [] },
+							status: null,
+						},
+					},
+				],
+			},
+		});
+		expect(failingStatuses(pr)).toEqual([]);
+	});
+});
+
+describe("pendingStatuses", () => {
+	it("returns empty for no commit statuses", () => {
+		const pr = makeMockPR();
+		expect(pendingStatuses(pr)).toEqual([]);
+	});
+
+	it("detects pending commit statuses", () => {
+		const pr = makeMockPR({
+			commits: {
+				nodes: [
+					{
+						commit: {
+							checkSuites: { nodes: [] },
+							status: {
+								state: "PENDING",
+								contexts: [
+									{ state: "PENDING", context: "ci/circleci: Build", description: "Pending", targetUrl: null },
+								],
+							},
+						},
+					},
+				],
+			},
+		});
+		expect(pendingStatuses(pr)).toContain("ci/circleci: Build");
+	});
+
+	it("detects expected commit statuses", () => {
+		const pr = makeMockPR({
+			commits: {
+				nodes: [
+					{
+						commit: {
+							checkSuites: { nodes: [] },
+							status: {
+								state: "EXPECTED",
+								contexts: [
+									{ state: "EXPECTED", context: "ci/travis-ci", description: "Expected", targetUrl: null },
+								],
+							},
+						},
+					},
+				],
+			},
+		});
+		expect(pendingStatuses(pr)).toContain("ci/travis-ci");
+	});
+});
+
+describe("failingChecks includes commit statuses", () => {
+	it("detects failures from both check suites and commit statuses", () => {
+		const pr = makeMockPR({
+			commits: {
+				nodes: [
+					{
+						commit: {
+							checkSuites: {
+								nodes: [
+									{
+										id: "1",
+										conclusion: "FAILURE",
+										status: "COMPLETED",
+										app: { name: "GitHub Actions", slug: "github-actions" },
+										checkRuns: { nodes: [{ name: "test", conclusion: "FAILURE", status: "COMPLETED" }] },
+									},
+								],
+							},
+							status: {
+								state: "FAILURE",
+								contexts: [
+									{ state: "FAILURE", context: "ci/circleci: Build", description: "Your tests failed on CircleCI", targetUrl: "https://circleci.com/gh/org/repo/123" },
+								],
+							},
+						},
+					},
+				],
+			},
+		});
+		// Should include: check suite name (GitHub Actions), check run name (test), and commit status (ci/circleci: Build)
+		expect(failingChecks(pr)).toContain("GitHub Actions");
+		expect(failingChecks(pr)).toContain("ci/circleci: Build");
+		expect(failingChecks(pr).length).toBe(3);
+	});
+
+	it("detects failures from commit statuses alone (no check suites)", () => {
+		const pr = makeMockPR({
+			commits: {
+				nodes: [
+					{
+						commit: {
+							checkSuites: { nodes: [] },
+							status: {
+								state: "FAILURE",
+								contexts: [
+									{ state: "FAILURE", context: "ci/circleci: Build", description: "Your tests failed on CircleCI", targetUrl: null },
+								],
+							},
+						},
+					},
+				],
+			},
+		});
+		expect(failingChecks(pr)).toContain("ci/circleci: Build");
+		expect(failingChecks(pr).length).toBe(1);
+	});
+});
+
+describe("pendingChecks includes commit statuses", () => {
+	it("detects pending from both check suites and commit statuses", () => {
+		const pr = makeMockPR({
+			commits: {
+				nodes: [
+					{
+						commit: {
+							checkSuites: {
+								nodes: [
+									{
+										id: "1",
+										conclusion: null,
+										status: "IN_PROGRESS",
+										app: { name: "GitHub Actions", slug: "github-actions" },
+										checkRuns: { nodes: [] },
+									},
+								],
+							},
+							status: {
+								state: "PENDING",
+								contexts: [
+									{ state: "PENDING", context: "ci/circleci: Build", description: "Pending", targetUrl: null },
+								],
+							},
+						},
+					},
+				],
+			},
+		});
+		expect(pendingChecks(pr)).toContain("GitHub Actions");
+		expect(pendingChecks(pr)).toContain("ci/circleci: Build");
 	});
 });
 

@@ -72,6 +72,15 @@ const AWAIT_QUERY = `query AwaitPR(
                 }
               }
             }
+            status {
+              state
+              contexts {
+                state
+                context
+                description
+                targetUrl
+              }
+            }
           }
         }
       }
@@ -207,6 +216,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	let lastStatusTimestamp: Date | null = null;
 	let agentTurnActive = false;
 	let queuedUpdate: string | null = null;
+	let queuedForceCheck: string | null = null;
 	let lastSentUpdate: string | null = null;
 	let lastSentReminder: string | null = null;
 	let needsReminder = false;
@@ -248,6 +258,13 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		pi.sendUserMessage(update, {deliverAs: "steer"});
 			lastSentUpdate = update;
 			lastSentReminder = null; // real update supersedes any prior reminder
+			lastNudgeTime = Date.now();
+		}
+		// Flush queued force-check result when turn ends
+		if (queuedForceCheck !== null) {
+			const msg = queuedForceCheck;
+			queuedForceCheck = null;
+			pi.sendUserMessage(msg, {deliverAs: "steer"});
 			lastNudgeTime = Date.now();
 		}
 		// Schedule a reminder on next poll if actionable items remain
@@ -293,6 +310,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			lastNudgeTime = 0;
 			needsReminder = false;
 			forceNotify = false;
+			queuedForceCheck = null;
 			consecutiveNoChange = 0;
 			updateFooter();
 		});
@@ -322,6 +340,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			lastNudgeTime = 0;
 			needsReminder = false;
 			forceNotify = false;
+			queuedForceCheck = null;
 			consecutiveNoChange = 0;
 			updateFooter();
 			return `Stopped monitoring https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
@@ -334,6 +353,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		lastNudgeTime = 0;
 		needsReminder = false;
 		forceNotify = false;
+		queuedForceCheck = null;
 		consecutiveNoChange = 0;
 		updateFooter();
 		return "No monitor running";
@@ -396,13 +416,19 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				}
 
 				// Force-check: always send current state (triggered by /ghpr-monitor check or tool check action)
-				if (forceNotify && !agentTurnActive) {
+				// Unlike automatic updates, force-checks are user-initiated and should always be delivered.
+				// When the agent turn is active, queue the result to be flushed on turn_end.
+				if (forceNotify) {
 					const prUrl = `https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
 					const items = formatActionableItems(curr, config);
 					const msg = items ?? `\u2705 No issues found on ${prUrl}`;
-					pi.sendUserMessage(msg, {deliverAs: "steer"});
-					lastSentReminder = items;
-					lastNudgeTime = Date.now();
+					if (agentTurnActive) {
+						queuedForceCheck = msg;
+					} else {
+						pi.sendUserMessage(msg, {deliverAs: "steer"});
+						lastSentReminder = items;
+						lastNudgeTime = Date.now();
+					}
 					forceNotify = false;
 				}
 

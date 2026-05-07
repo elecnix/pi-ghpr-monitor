@@ -42,7 +42,7 @@ describe("forceNotify fix", () => {
 
   it("forceNotify block sends actionable items or all-clear", () => {
     const block = src.slice(
-      src.indexOf("if (forceNotify && !agentTurnActive)"),
+      src.indexOf("Force-check: always send current state"),
       src.indexOf("Periodic nudge")
     );
     expect(block).toContain("formatActionableItems(curr, config)");
@@ -53,7 +53,7 @@ describe("forceNotify fix", () => {
 
   it("forceNotify block cleared after use", () => {
     const block = src.slice(
-      src.indexOf("if (forceNotify && !agentTurnActive)"),
+      src.indexOf("Force-check: always send current state"),
       src.indexOf("Periodic nudge")
     );
     expect(block).toContain("forceNotify = false;");
@@ -121,7 +121,7 @@ describe("pollLoop error handler cleanup", () => {
     // stopMonitor() is the reference implementation for proper cleanup.
     // It resets: monitorState, lastStatus, lastStatusTimestamp, lastSentUpdate,
     // lastSentReminder, lastNudgeTime, needsReminder, forceNotify,
-    // consecutiveNoChange, and calls updateFooter().
+    // queuedForceCheck, consecutiveNoChange, and calls updateFooter().
     const stopFn = src.slice(
       src.indexOf("function stopMonitor"),
       src.indexOf("async function pollLoop")
@@ -133,6 +133,7 @@ describe("pollLoop error handler cleanup", () => {
     expect(stopFn).toContain("lastNudgeTime = 0");
     expect(stopFn).toContain("needsReminder = false");
     expect(stopFn).toContain("forceNotify = false");
+    expect(stopFn).toContain("queuedForceCheck = null");
     expect(stopFn).toContain("consecutiveNoChange = 0");
     expect(stopFn).toContain("updateFooter()");
   });

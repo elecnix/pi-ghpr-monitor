@@ -40,9 +40,22 @@ export interface CheckSuiteNode {
 	checkRuns: { nodes: CheckRunNode[] };
 }
 
+export interface StatusContextNode {
+	state: string;
+	context: string;
+	description: string | null;
+	targetUrl: string | null;
+}
+
+export interface CommitStatusNode {
+	state: string;
+	contexts: StatusContextNode[];
+}
+
 export interface CommitNode {
 	commit: {
 		checkSuites: { nodes: CheckSuiteNode[] };
+		status: CommitStatusNode | null;
 	};
 }
 
@@ -90,6 +103,10 @@ export interface PRStatus {
 	threadDetails: ThreadSummary[];
 	commentDetails: CommentSummary[];
 	checkDetails: CheckSummary[];
+	// Commit statuses (old-style status API)
+	failingStatuses?: string[];
+	pendingStatuses?: string[];
+	statusDetails?: CheckSummary[];
 }
 
 // ---------------------------------------------------------------------------
@@ -112,6 +129,8 @@ export interface MonitorConfig {
 
 const FAILURE_CONCLUSIONS: Set<string> = new Set(["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED"]);
 const PENDING_STATUSES: Set<string> = new Set(["IN_PROGRESS", "QUEUED", "WAITING", "STARTUP_FAILURE"]);
+const FAILURE_COMMIT_STATES: Set<string> = new Set(["FAILURE", "ERROR"]);
+const PENDING_COMMIT_STATES: Set<string> = new Set(["PENDING", "EXPECTED"]);
 
 export function countUnresolvedThreads(pr: PullRequestData): number {
 	return pr.reviewThreads.nodes.filter((t: ReviewThreadNode) => {
@@ -138,6 +157,14 @@ export function failingChecks(pr: PullRequestData): string[] {
 				}
 			}
 		}
+		// Also check commit statuses (old-style status API used by CircleCI, etc.)
+		if (commit.commit.status) {
+			for (const ctx of commit.commit.status.contexts) {
+				if (FAILURE_COMMIT_STATES.has(ctx.state)) {
+					failing.add(ctx.context);
+				}
+			}
+		}
 	}
 	return [...failing];
 }
@@ -149,6 +176,42 @@ export function pendingChecks(pr: PullRequestData): string[] {
 			if (PENDING_STATUSES.has(suite.status)) {
 				const name = suite.app.name || suite.app.slug || `suite-${suite.id}`;
 				pending.add(name);
+			}
+		}
+		// Also check commit statuses (old-style status API)
+		if (commit.commit.status) {
+			for (const ctx of commit.commit.status.contexts) {
+				if (PENDING_COMMIT_STATES.has(ctx.state)) {
+					pending.add(ctx.context);
+				}
+			}
+		}
+	}
+	return [...pending];
+}
+
+export function failingStatuses(pr: PullRequestData): string[] {
+	const failing: Set<string> = new Set();
+	for (const commit of pr.commits.nodes) {
+		if (commit.commit.status) {
+			for (const ctx of commit.commit.status.contexts) {
+				if (FAILURE_COMMIT_STATES.has(ctx.state)) {
+					failing.add(ctx.context);
+				}
+			}
+		}
+	}
+	return [...failing];
+}
+
+export function pendingStatuses(pr: PullRequestData): string[] {
+	const pending: Set<string> = new Set();
+	for (const commit of pr.commits.nodes) {
+		if (commit.commit.status) {
+			for (const ctx of commit.commit.status.contexts) {
+				if (PENDING_COMMIT_STATES.has(ctx.state)) {
+					pending.add(ctx.context);
+				}
 			}
 		}
 	}
@@ -202,6 +265,7 @@ export function snapshotPR(pr: PullRequestData): PRStatus {
 		}));
 
 	const checks: CheckSummary[] = [];
+	const statusChecks: CheckSummary[] = [];
 	for (const commit of pr.commits.nodes) {
 		for (const suite of commit.commit.checkSuites.nodes) {
 			if (suite.conclusion && FAILURE_CONCLUSIONS.has(suite.conclusion)) {
@@ -211,6 +275,14 @@ export function snapshotPR(pr: PullRequestData): PRStatus {
 			for (const run of suite.checkRuns.nodes) {
 				if (run.conclusion && FAILURE_CONCLUSIONS.has(run.conclusion)) {
 					checks.push({ name: run.name, conclusion: run.conclusion });
+				}
+			}
+		}
+		// Commit statuses (old-style status API)
+		if (commit.commit.status) {
+			for (const ctx of commit.commit.status.contexts) {
+				if (FAILURE_COMMIT_STATES.has(ctx.state)) {
+					statusChecks.push({ name: ctx.context, conclusion: ctx.state });
 				}
 			}
 		}
@@ -227,6 +299,9 @@ export function snapshotPR(pr: PullRequestData): PRStatus {
 		threadDetails: threads,
 		commentDetails: comments,
 		checkDetails: checks,
+		failingStatuses: failingStatuses(pr),
+		pendingStatuses: pendingStatuses(pr),
+		statusDetails: statusChecks,
 	};
 }
 
@@ -242,7 +317,7 @@ export function formatStatusUpdate(prev: PRStatus | null, curr: PRStatus, config
 	const prevFailing = prev?.failingChecks ?? [];
 	const newFailing = curr.failingChecks.filter(c => !prevFailing.includes(c));
 	if (curr.failingChecks.length > 0 && (!prev || newFailing.length > 0)) {
-		const details = formatCheckDetails(curr.checkDetails ?? []);
+		const details = formatCheckDetails([...(curr.checkDetails ?? []), ...(curr.statusDetails ?? [])]);
 		if (details) {
 			lines.push(`❌ Failing CI checks on ${prLabel}:${details}`);
 		} else {
@@ -280,12 +355,13 @@ export function formatStatusUpdate(prev: PRStatus | null, curr: PRStatus, config
 		}
 	}
 
-	// All checks passed
+	// All checks passed (including commit statuses)
 	if (
 		curr.pendingChecks.length === 0 &&
 		curr.failingChecks.length === 0 &&
+		(curr.pendingStatuses ?? []).length === 0 &&
 		prev &&
-		(prev.pendingChecks.length > 0 || prev.failingChecks.length > 0)
+		(prev.pendingChecks.length > 0 || prev.failingChecks.length > 0 || (prev.pendingStatuses ?? []).length > 0)
 	) {
 		lines.push(`✅ All CI checks passed on ${prLabel}`);
 	}
@@ -297,7 +373,8 @@ export function formatStatusUpdate(prev: PRStatus | null, curr: PRStatus, config
 		curr.generalComments === 0 &&
 		curr.failingChecks.length === 0 &&
 		curr.pendingChecks.length === 0 &&
-		(!prev || prev.hasConflicts || prev.unresolvedThreads > 0 || prev.generalComments > 0 || prev.failingChecks.length > 0 || prev.pendingChecks.length > 0)
+		(curr.pendingStatuses ?? []).length === 0 &&
+		(!prev || prev.hasConflicts || prev.unresolvedThreads > 0 || prev.generalComments > 0 || prev.failingChecks.length > 0 || prev.pendingChecks.length > 0 || (prev.pendingStatuses ?? []).length > 0)
 	) {
 		lines.push(`✨ ${prLabel} — no issues, all clear`);
 	}
@@ -352,7 +429,7 @@ export function formatActionableItems(status: PRStatus, config: MonitorConfig): 
 	}
 
 	if (status.failingChecks.length > 0) {
-		const details = formatCheckDetails(status.checkDetails ?? []);
+		const details = formatCheckDetails([...(status.checkDetails ?? []), ...(status.statusDetails ?? [])]);
 		if (details) {
 			lines.push(`❌ Failing CI checks on ${prLabel}:${details}`);
 		} else {
