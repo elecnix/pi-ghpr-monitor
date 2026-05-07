@@ -12,6 +12,7 @@
 import type { ExtensionAPI, ExtensionUIContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
+import * as path from "node:path";
 import {
 	type PullRequestData,
 	type PRStatus,
@@ -21,6 +22,7 @@ import {
 	formatStatusUpdate,
 	formatFooterStatus,
 } from "./analyzer";
+import { initLogger, closeLogger, log, logPRSnapshot, logStatus, getLogPath } from "./logger";
 
 // ---------------------------------------------------------------------------
 // GraphQL query (same as gh-pr-review's AWAIT_QUERY)
@@ -243,6 +245,14 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		};
 	});
 
+	// Initialize logger when session starts
+	pi.on("session_start", async (_event, ctx) => {
+		const sessionFile = ctx.sessionManager.getSessionFile();
+		const sessionId = sessionFile ? path.basename(sessionFile, path.extname(sessionFile)) : `ephemeral-${Date.now()}`;
+		initLogger(sessionId);
+		log(`Session started, log file: ${getLogPath()}`);
+	});
+
 	// Track agent turn state to avoid spamming updates while LLM is working
 	pi.on("turn_start", () => {
 		agentTurnActive = true;
@@ -280,10 +290,13 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 
 	// Clean up on session shutdown
 	pi.on("session_shutdown", async () => {
+		log("Session shutdown event received");
 		stopMonitor();
+		closeLogger();
 	});
 
 	function startMonitor(config: MonitorConfig): string {
+		log(`Starting monitor: ${config.owner}/${config.repo}#${config.number} (interval: ${config.intervalSec}s, mode: ${config.mode})`);
 		stopMonitor();
 
 		const controller = new AbortController();
@@ -328,6 +341,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	}
 
 	function stopMonitor(): string {
+		log("Stopping monitor");
 		if (monitorState.status === "running") {
 			monitorState.controller.abort();
 			pollWakeResolve = null;
@@ -374,6 +388,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 
 			try {
 				const pr = await fetchPRData(config, signal, mockBaseUrl);
+				log(`Fetched PR data for ${config.owner}/${config.repo}#${config.number}`);
+				logPRSnapshot(pr);
 
 				// Check if PR was merged or closed
 				if (pr.state === "MERGED" || pr.state === "CLOSED") {
@@ -386,6 +402,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				}
 
 				const curr = snapshotPR(pr);
+				logStatus(curr);
 				const update = formatStatusUpdate(lastStatus, curr, config);
 				const hadChange = update.length > 0;
 
@@ -424,7 +441,9 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					const msg = items ?? `\u2705 No issues found on ${prUrl}`;
 					if (agentTurnActive) {
 						queuedForceCheck = msg;
+						log("Force-check queued (agent active)");
 					} else {
+						log(`Force-check result: ${items ? 'issues found' : 'no issues'} for ${prUrl}`);
 						pi.sendUserMessage(msg, {deliverAs: "steer"});
 						lastSentReminder = items;
 						lastNudgeTime = Date.now();
@@ -461,6 +480,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			} catch (err) {
 				if (signal.aborted) return;
 				const errMsg = err instanceof Error ? err.message : String(err);
+				log(`Poll error: ${errMsg}`);
 				const isRateLimit = /rate limit/i.test(errMsg);
 				// Exponential backoff for ALL errors (rate limits, connection failures, etc.)
 				backoffSec = backoffSec === 0
@@ -550,6 +570,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				backoffSec = 0;
 				consecutiveNoChange = 0;
 				forceNotify = true;
+				log("Force check triggered via /ghpr-monitor command");
 				// Wake the poll loop immediately
 				if (pollWakeResolve) {
 					pollWakeResolve();
@@ -820,6 +841,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					backoffSec = 0;
 					consecutiveNoChange = 0;
 					forceNotify = true;
+					log("Force check triggered via ghpr-monitor tool");
 					if (pollWakeResolve) {
 						pollWakeResolve();
 						pollWakeResolve = null;
