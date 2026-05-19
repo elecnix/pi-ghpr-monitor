@@ -5,8 +5,11 @@
  *   /ghpr-monitor [on|off|owner/repo#number|check]  — user-facing command (no args = ask agent)
  *   ghpr-monitor                                 — LLM-callable tool
  *
- * The tool polls a PR for comments, conflicts, and CI status, then
- * injects notifications into the agent session so the LLM can take action.
+ * The tool polls one or more PRs for comments, conflicts, and CI status,
+ * then injects notifications into the agent session so the LLM can take action.
+ *
+ * Multiple PRs can be monitored simultaneously — each runs its own
+ * independent poll loop with its own state (backoff, status, reminders).
  */
 
 import type { ExtensionAPI, ExtensionUIContext, MessageRenderer } from "@mariozechner/pi-coding-agent";
@@ -54,7 +57,6 @@ const AWAIT_QUERY = `query AwaitPR(
           isResolved
           comments(last: $lastThreadComments) {
             nodes { id body author { login } createdAt path line reactions(content: THUMBS_UP, first: 1) { nodes { content } } }
-          }
         }
       }
       mergeable
@@ -178,14 +180,14 @@ async function fetchPRData(config: MonitorConfig, signal?: AbortSignal, mockBase
 
 const PR_URL_RE = /^https?:\/\/([^\/]+)\/([^\/]+)\/([^\/]+)\/pull\/([0-9]+)/i;
 
-interface ParsedPR {
+export interface ParsedPR {
 	owner: string;
 	repo: string;
 	number: number;
 	host: string;
 }
 
-function parsePRUrl(input: string): ParsedPR | null {
+export function parsePRUrl(input: string): ParsedPR | null {
 	const m = input.trim().match(PR_URL_RE);
 	if (!m) return null;
 	const host = m[1] === "github.com" ? "github.com" : m[1];
@@ -193,7 +195,7 @@ function parsePRUrl(input: string): ParsedPR | null {
 }
 
 /** Parse shorthand formats like "owner/repo#123" */
-function parsePRShorthand(input: string): ParsedPR | null {
+export function parsePRShorthand(input: string): ParsedPR | null {
 	// Try "owner/repo#number" (e.g. "mobilityhouse/vgi-na-masscec#373")
 	const hashM = input.trim().match(/^([^\s#/]+)\/([^#]+)#([0-9]+)$/);
 	if (hashM) {
@@ -203,43 +205,80 @@ function parsePRShorthand(input: string): ParsedPR | null {
 }
 
 // ---------------------------------------------------------------------------
-// Monitor state management
+// PR key helper
 // ---------------------------------------------------------------------------
 
-type MonitorState =
-	| { status: "idle" }
-	| { status: "running"; config: MonitorConfig; controller: AbortController }
-	| { status: "stopped" };
+/** Generate a unique key for a PR monitor. */
+export function prKey(config: MonitorConfig): string;
+export function prKey(owner: string, repo: string, number: number, host?: string): string;
+export function prKey(a: string | MonitorConfig, b?: string, c?: number, d?: string): string {
+	if (typeof a === "object") {
+		const cfg = a as MonitorConfig;
+		return cfg.host === "github.com"
+			? `${cfg.owner}/${cfg.repo}#${cfg.number}`
+			: `${cfg.host}/${cfg.owner}/${cfg.repo}#${cfg.number}`;
+	}
+	return (!d || d === "github.com")
+		? `${a}/${b}#${c}`
+		: `${d}/${a}/${b}#${c}`;
+}
+
+// ---------------------------------------------------------------------------
+// Active monitor entry
+// ---------------------------------------------------------------------------
+
+export interface ActiveMonitor {
+	config: MonitorConfig;
+	controller: AbortController;
+	lastStatus: PRStatus | null;
+	lastStatusTimestamp: Date | null;
+	lastSentUpdate: string | null;
+	lastSentReminder: string | null;
+	needsReminder: boolean;
+	forceNotify: boolean;
+	backoffSec: number;
+	consecutiveNoChange: number;
+	lastNudgeTime: number; // epoch ms
+	pollWakeResolve: (() => void) | null;
+}
+
+function createActiveMonitor(config: MonitorConfig): ActiveMonitor {
+	return {
+		config,
+		controller: new AbortController(),
+		lastStatus: null,
+		lastStatusTimestamp: null,
+		lastSentUpdate: null,
+		lastSentReminder: null,
+		needsReminder: false,
+		forceNotify: false,
+		backoffSec: 0,
+		consecutiveNoChange: 0,
+		lastNudgeTime: 0,
+		pollWakeResolve: null,
+	};
+}
 
 // ---------------------------------------------------------------------------
 // Main extension
 // ---------------------------------------------------------------------------
 
 export default function ghprMonitorExtension(pi: ExtensionAPI) {
-	let monitorState: MonitorState = { status: "idle" };
-	let lastStatus: PRStatus | null = null;
-	let lastStatusTimestamp: Date | null = null;
+	const monitors: Map<string, ActiveMonitor> = new Map();
 	let agentTurnActive = false;
 	let queuedUpdate: string | null = null;
 	let queuedForceCheck: string | null = null;
 	let queuedForceCheckDetailed: string | null = null;
 	let lastSentUpdate: string | null = null;
-	let lastSentReminder: string | null = null;
-	let needsReminder = false;
-	let forceNotify = false;
-	let backoffSec = 0;
-	let consecutiveNoChange = 0;
-	let lastNudgeTime = 0; // epoch ms of last nudge sent (update or reminder)
-	const NUDGE_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes between nudges for idle agent
 	let uiCtx: ExtensionUIContext | undefined;
-	let pollWakeResolve: (() => void) | null = null;
 	const MAX_BACKOFF_SEC = 300; // 5 minutes max rate-limit backoff
 	const MAX_IDLE_SEC = 3600; // 1 hour max idle polling
+	const NUDGE_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes between nudges for idle agent
 
 	// For testing: allows pointing at a mock server
 	let mockBaseUrl: string | undefined;
 
-	const STEERING_PROMPT = `You have access to the ghpr-monitor tool. When the user asks you to watch or monitor a PR, use ghpr-monitor with action "start" to begin monitoring. The tool has actions: start and status. Monitoring continues until the user stops it with /ghpr-monitor off. The user can also run /ghpr-monitor check to trigger an immediate poll. You will receive PR status updates as notifications with full comment details (body, file path, line number) so you can act on them without additional API calls. The url parameter accepts GitHub PR URLs or shorthand like "owner/repo#123".`;
+	const STEERING_PROMPT = `You have access to the ghpr-monitor tool. When the user asks you to watch or monitor a PR, use ghpr-monitor with action "start" to begin monitoring. The tool has actions: start, status, check, and stop. Multiple PRs can be monitored simultaneously. Monitoring continues until the user stops it with /ghpr-monitor off (stops all) or /ghpr-monitor off <PR> (stops specific). The user can also run /ghpr-monitor check to trigger an immediate poll (all PRs or a specific one). You will receive PR status updates as notifications. The url parameter accepts GitHub PR URLs or shorthand like "owner/repo#123".`;
 
 	// Register a custom message renderer for "ghpr-monitor" messages.
 	// This renders only the concise summary in the TUI, while the agent
@@ -252,9 +291,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		return box;
 	});
 
-	// Inject steering prompt when monitor is idle (so the LLM knows about the tool)
+	// Inject steering prompt so the LLM knows about the tool
 	pi.on("before_agent_start", async (event, _ctx) => {
-		// Always inject steering prompt so the LLM knows the tool exists
 		return {
 			systemPrompt: event.systemPrompt + "\n\n" + STEERING_PROMPT,
 		};
@@ -280,7 +318,9 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	// Track agent turn state to avoid spamming updates while LLM is working
 	pi.on("turn_start", () => {
 		agentTurnActive = true;
-		needsReminder = false;
+		for (const mon of monitors.values()) {
+			mon.needsReminder = false;
+		}
 	});
 
 	pi.on("turn_end", () => {
@@ -291,119 +331,150 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			queuedUpdate = null;
 			sendPRNotification(update, update, {deliverAs: "steer"});
 			lastSentUpdate = update;
-			lastSentReminder = null; // real update supersedes any prior reminder
-			lastNudgeTime = Date.now();
+			// Mark all monitors that their reminders are superseded
+			for (const mon of monitors.values()) {
+				mon.lastSentReminder = null;
+			}
 		}
 		// Flush queued force-check result when turn ends
 		if (queuedForceCheck !== null) {
 			const concMsg = queuedForceCheck;
 			const detMsg = queuedForceCheckDetailed;
 			queuedForceCheck = null;
-		queuedForceCheckDetailed = null;
 			queuedForceCheckDetailed = null;
 			sendPRNotification(concMsg, detMsg ?? concMsg, {deliverAs: "steer"});
-			lastNudgeTime = Date.now();
+			for (const mon of monitors.values()) {
+				mon.lastNudgeTime = Date.now();
+			}
 		}
-		// Schedule a reminder on next poll if actionable items remain
-		if (monitorState.status === "running" && lastStatus) {
-			needsReminder = true;
+		// Schedule a reminder on next poll for each monitor with actionable items
+		for (const mon of monitors.values()) {
+			if (mon.lastStatus) {
+				mon.needsReminder = true;
+			}
 		}
-		// Wake the poll loop early so the footer updates with latest state
-		if (pollWakeResolve) {
-			pollWakeResolve();
-			pollWakeResolve = null;
+		// Wake all poll loops early so footers update
+		for (const mon of monitors.values()) {
+			if (mon.pollWakeResolve) {
+				mon.pollWakeResolve();
+				mon.pollWakeResolve = null;
+			}
 		}
 	});
 
 	// Clean up on session shutdown
 	pi.on("session_shutdown", async () => {
 		log("Session shutdown event received");
-		stopMonitor();
+		stopAllMonitors();
 		closeLogger();
 	});
 
-	function startMonitor(config: MonitorConfig): string {
-		log(`Starting monitor: ${config.owner}/${config.repo}#${config.number} (interval: ${config.intervalSec}s, mode: ${config.mode})`);
-		stopMonitor();
+	// -----------------------------------------------------------------------
+	// Monitor management
+	// -----------------------------------------------------------------------
 
-		const controller = new AbortController();
-		monitorState = { status: "running", config, controller };
-		lastStatus = null;
-		lastStatusTimestamp = null;
-		lastSentUpdate = null;
-		lastSentReminder = null;
-		lastNudgeTime = 0;
+	function startMonitor(config: MonitorConfig): { key: string; message: string; alreadyMonitoring?: boolean } {
+		log(\`Starting monitor: \${config.owner}/\${config.repo}#\${config.number} (interval: \${config.intervalSec}s, mode: \${config.mode})\`);
+		const key = prKey(config);
+
+		if (monitors.has(key)) {
+			const existing = monitors.get(key)!;
+			return {
+				key,
+				message: `Already monitoring https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}. Use /ghpr-monitor off ${key} to stop.`,
+				alreadyMonitoring: true,
+			};
+		}
+
+		const mon = createActiveMonitor(config);
+		monitors.set(key, mon);
 		updateFooter();
 
-		pollLoop(config, controller.signal).catch((err) => {
-			if (controller.signal.aborted) return;
+		pollLoop(mon).catch((err) => {
+			if (mon.controller.signal.aborted) return;
 			pi.sendMessage({
 				customType: "ghpr-monitor-error",
-				content: `PR monitor error: ${err instanceof Error ? err.message : String(err)}`,
+				content: `PR monitor error for ${key}: ${err instanceof Error ? err.message : String(err)}`,
 				display: true,
 			});
-			monitorState = { status: "idle" };
-			lastStatus = null;
-			lastStatusTimestamp = null;
-			lastSentUpdate = null;
-			lastSentReminder = null;
-			lastNudgeTime = 0;
-			needsReminder = false;
-			forceNotify = false;
-			queuedForceCheck = null;
-		queuedForceCheckDetailed = null;
-			consecutiveNoChange = 0;
+			monitors.delete(key);
 			updateFooter();
 		});
 
-		return `Started monitoring https://${config.host}/${config.owner}/${config.repo}/pull/${config.number} (interval: ${config.intervalSec}s, mode: ${config.mode})`;
+		return {
+			key,
+			message: `Started monitoring https://${config.host}/${config.owner}/${config.repo}/pull/${config.number} (interval: ${config.intervalSec}s, mode: ${config.mode})`,
+		};
+	}
+
+	function stopMonitorByKey(key: string): string {
+		log(`Stopping monitor: ${key}`);
+		const mon = monitors.get(key);
+		if (!mon) {
+			return `Not monitoring ${key}`;
+		}
+		mon.controller.abort();
+		mon.pollWakeResolve = null;
+		const config = mon.config;
+		monitors.delete(key);
+		updateFooter();
+		return `Stopped monitoring https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
+	}
+
+	function stopAllMonitors(): string {
+		log("Stopping all monitors");
+		if (monitors.size === 0) {
+			return "No monitors running";
+		}
+		const keys = [...monitors.keys()];
+		for (const [key, mon] of monitors) {
+			mon.controller.abort();
+			mon.pollWakeResolve = null;
+		}
+		monitors.clear();
+		updateFooter();
+		return `Stopped monitoring ${keys.length} PR(s): ${keys.join(", ")}`;
 	}
 
 	function updateFooter() {
 		if (!uiCtx) return;
-		if (monitorState.status === "running") {
-			uiCtx.setStatus("ghpr-monitor", formatFooterStatus(monitorState.config, lastStatus));
-		} else {
+		if (monitors.size === 0) {
 			uiCtx.setStatus("ghpr-monitor", undefined);
+			return;
 		}
+
+		if (monitors.size === 1) {
+			const mon = monitors.values().next().value!;
+			uiCtx.setStatus("ghpr-monitor", formatFooterStatus(mon.config, mon.lastStatus));
+			return;
+		}
+
+		// Multiple monitors: aggregate summary
+		let issuesCount = 0;
+		let clearCount = 0;
+		for (const mon of monitors.values()) {
+			if (mon.lastStatus && (
+				mon.lastStatus.hasConflicts ||
+				mon.lastStatus.unresolvedThreads > 0 ||
+				mon.lastStatus.generalComments > 0 ||
+				mon.lastStatus.failingChecks.length > 0
+			)) {
+				issuesCount++;
+			} else {
+				clearCount++;
+			}
+		}
+
+		const parts: string[] = [];
+		if (issuesCount > 0) parts.push(`${issuesCount} with issues`);
+		if (clearCount > 0) parts.push(`${clearCount} clear`);
+		uiCtx.setStatus("ghpr-monitor", `📡 ${monitors.size} PRs: ${parts.join(", ")}`);
 	}
 
-	function stopMonitor(): string {
-		log("Stopping monitor");
-		if (monitorState.status === "running") {
-			monitorState.controller.abort();
-			pollWakeResolve = null;
-			const config = monitorState.config;
-			monitorState = { status: "idle" };
-			lastStatus = null;
-			lastStatusTimestamp = null;
-			lastSentUpdate = null;
-			lastSentReminder = null;
-			lastNudgeTime = 0;
-			needsReminder = false;
-			forceNotify = false;
-			queuedForceCheck = null;
-		queuedForceCheckDetailed = null;
-			consecutiveNoChange = 0;
-			updateFooter();
-			return `Stopped monitoring https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
-		}
-		monitorState = { status: "idle" };
-		lastStatus = null;
-		lastStatusTimestamp = null;
-		lastSentUpdate = null;
-		lastSentReminder = null;
-		lastNudgeTime = 0;
-		needsReminder = false;
-		forceNotify = false;
-		queuedForceCheck = null;
-		queuedForceCheckDetailed = null;
-		consecutiveNoChange = 0;
-		updateFooter();
-		return "No monitor running";
-	}
+	async function pollLoop(mon: ActiveMonitor): Promise<void> {
+		const { config, controller } = mon;
+		const signal = controller.signal;
 
-	async function pollLoop(config: MonitorConfig, signal: AbortSignal): Promise<void> {
 		// Initial check
 		const initialMsg = `📡 Monitoring ${config.owner}/${config.repo}#${config.number}... (polling every ${config.intervalSec}s)`;
 		pi.sendMessage({
@@ -427,13 +498,14 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					const reason = pr.merged ? "merged" : "closed";
 					const msg = `${pr.merged ? "🔀" : "❌"} PR ${prUrl} was ${reason}. Monitoring stopped.`;
 					sendPRNotification(msg, msg, {deliverAs: "steer"});
-					stopMonitor();
+					const key = prKey(config);
+					monitors.delete(key);
+					updateFooter();
 					return;
 				}
 
 				const curr = snapshotPR(pr);
-				logStatus(curr);
-				const update = formatStatusUpdate(lastStatus, curr, config);
+				const update = formatStatusUpdate(mon.lastStatus, curr, config);
 				const hadChange = update.length > 0;
 
 				if (update) {
@@ -442,116 +514,101 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 						queuedUpdate = update;
 					} else if (update !== lastSentUpdate) {
 						// Only send if something changed since last update
-						const { concise: concUpdate, detailed: detUpdate } = formatAgentStatusUpdate(lastStatus, curr, config);
-						sendPRNotification(concUpdate, detUpdate, {deliverAs: "steer"});
-						lastSentUpdate = concUpdate;
-						lastSentReminder = null; // real update supersedes any prior reminder
-						lastNudgeTime = Date.now();
+						const { concise: concUpdate, detailed: detUpdate } = formatAgentStatusUpdate(mon.lastStatus, curr, config); sendPRNotification(concUpdate, detUpdate, {deliverAs: "steer"});
+						lastSentUpdate = update;
+						mon.lastSentUpdate = update;
+						mon.lastSentReminder = null; // real update supersedes any prior reminder
+						mon.lastNudgeTime = Date.now();
 					}
 				}
 
 				// If agent just went idle and actionable items remain, send a reminder
-				// Only send if the reminder content differs from the last one sent
-				// to avoid spamming the agent with identical reminders during active work
-				if (needsReminder && !agentTurnActive) {
+				if (mon.needsReminder && !agentTurnActive) {
 					const reminder = formatActionableItems(curr, config);
-					const agentReminder = formatAgentNotification(curr, config);
-					if (reminder && reminder !== lastSentReminder) {
-						const detReminder = agentReminder?.detailed ?? reminder;
-						sendPRNotification(reminder, detReminder, {deliverAs: "steer"});
-						lastSentReminder = reminder;
-						lastNudgeTime = Date.now();
+					if (reminder && reminder !== mon.lastSentReminder) {
+						const detReminder = formatAgentNotification(curr, config); sendPRNotification(reminder, detReminder ?? reminder, {deliverAs: "steer"});
+						mon.lastSentReminder = reminder;
+						mon.lastNudgeTime = Date.now();
 					}
-					needsReminder = false;
+					mon.needsReminder = false;
 				}
 
-				// Force-check: always send current state (triggered by /ghpr-monitor check or tool check action)
-				// Unlike automatic updates, force-checks are user-initiated and should always be delivered.
-				// When the agent turn is active, queue the result to be flushed on turn_end.
-				if (forceNotify) {
+				// Force-check
+				if (mon.forceNotify && !agentTurnActive) {
 					const prUrl = `https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
 					const items = formatActionableItems(curr, config);
-					const agentItems = formatAgentNotification(curr, config);
-					const concMsg = items ?? `u2705 No issues found on ${prUrl}`;
-					const detMsg = agentItems?.detailed ?? concMsg;
+					const detItems = formatAgentNotification(curr, config);
+					const msg = items ?? `\u2705 No issues found on ${prUrl}`;
+					const detMsg = detItems ?? `\u2705 No issues found on ${prUrl}`;
 					if (agentTurnActive) {
-						queuedForceCheck = concMsg;
+						queuedForceCheck = msg;
 						queuedForceCheckDetailed = detMsg;
-						log("Force-check queued (agent active)");
 					} else {
-						log(`Force-check result: ${items ? "issues found" : "no issues"} for ${prUrl}`);
-						sendPRNotification(concMsg, detMsg, {deliverAs: "steer"});
-						lastSentReminder = items;
-						lastNudgeTime = Date.now();
+						sendPRNotification(msg, detMsg, {deliverAs: "steer"});
 					}
-					forceNotify = false;
+					mon.lastSentReminder = items;
+					mon.lastNudgeTime = Date.now();
+					mon.forceNotify = false;
 				}
 
-				// Periodic nudge: if the agent has been idle for a while with
-				// unresolved actionable items and nothing else triggered a notification,
-				// send a nudge to keep the agent from forgetting about them.
+				// Periodic nudge
 				if (
 					!agentTurnActive &&
-					!needsReminder &&
-					lastNudgeTime > 0 &&
-					Date.now() - lastNudgeTime >= NUDGE_COOLDOWN_MS
+					!mon.needsReminder &&
+					mon.lastNudgeTime > 0 &&
+					Date.now() - mon.lastNudgeTime >= NUDGE_COOLDOWN_MS
 				) {
 					const nudge = formatActionableItems(curr, config);
-					const agentNudge = formatAgentNotification(curr, config);
+					const detNudge = formatAgentNotification(curr, config);
 					if (nudge) {
-						const detNudge = agentNudge?.detailed ?? nudge;
-						sendPRNotification(nudge, detNudge, {deliverAs: "steer"});
-						lastSentReminder = nudge;
-						lastNudgeTime = Date.now();
+						sendPRNotification(nudge, detNudge ?? nudge, {deliverAs: "steer"});
+						mon.lastSentReminder = nudge;
+						mon.lastNudgeTime = Date.now();
 					}
 				}
 
-				lastStatus = curr;
-				lastStatusTimestamp = new Date();
-				backoffSec = 0;
+				mon.lastStatus = curr;
+				mon.lastStatusTimestamp = new Date();
+				mon.backoffSec = 0;
 				updateFooter();
 				if (hadChange) {
-					consecutiveNoChange = 0;
+					mon.consecutiveNoChange = 0;
 				} else {
-					consecutiveNoChange++;
+					mon.consecutiveNoChange++;
 				}
 			} catch (err) {
 				if (signal.aborted) return;
 				const errMsg = err instanceof Error ? err.message : String(err);
-				log(`Poll error: ${errMsg}`);
 				const isRateLimit = /rate limit/i.test(errMsg);
-				// Exponential backoff for ALL errors (rate limits, connection failures, etc.)
-				backoffSec = backoffSec === 0
+				mon.backoffSec = mon.backoffSec === 0
 					? config.intervalSec
-					: Math.min(backoffSec * 2, MAX_BACKOFF_SEC);
+					: Math.min(mon.backoffSec * 2, MAX_BACKOFF_SEC);
 				pi.sendMessage({
 					customType: "ghpr-monitor-error",
 					content: isRateLimit
-						? `Rate limited, backing off ${backoffSec}s`
-						: `Poll error for ${config.owner}/${config.repo}#${config.number}: ${errMsg}${backoffSec > config.intervalSec ? ` (retrying in ${backoffSec}s)` : ""}`,
+						? `Rate limited on ${config.owner}/${config.repo}#${config.number}, backing off ${mon.backoffSec}s`
+						: `Poll error for ${config.owner}/${config.repo}#${config.number}: ${errMsg}${mon.backoffSec > config.intervalSec ? ` (retrying in ${mon.backoffSec}s)` : ""}`,
 					display: true,
 				});
 			}
 
 			// Wait for interval (abortable), with backoff after any error
-			// Slow polling during active turns — no need to poll frequently while the LLM works
-			const baseSec = backoffSec > 0 ? backoffSec : config.intervalSec;
-			// After 3 consecutive no-change polls, double interval each time up to 1 hour
-			const idleSec = consecutiveNoChange > 3
-				? Math.min(config.intervalSec * Math.pow(2, consecutiveNoChange - 3), MAX_IDLE_SEC)
+			const baseSec = mon.backoffSec > 0 ? mon.backoffSec : config.intervalSec;
+			const idleSec = mon.consecutiveNoChange > 3
+				? Math.min(config.intervalSec * Math.pow(2, mon.consecutiveNoChange - 3), MAX_IDLE_SEC)
 				: baseSec;
 			const waitSec = agentTurnActive ? Math.max(idleSec, 300) : idleSec;
 			await new Promise<void>((resolve) => {
-				pollWakeResolve = resolve;
+				mon.pollWakeResolve = resolve;
 				const timer = setTimeout(() => {
-					pollWakeResolve = null;
+					mon.pollWakeResolve = null;
 					resolve();
 				}, waitSec * 1000);
 				signal.addEventListener(
 					"abort",
 					() => {
 						clearTimeout(timer);
-						pollWakeResolve = null;
+						mon.pollWakeResolve = null;
 						resolve();
 					},
 					{ once: true },
@@ -562,20 +619,26 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		}
 	}
 
-	// Format the current monitor status for display alongside usage
+	// Format the current monitor status for display
 	function formatCurrentStatus(): string {
-		if (monitorState.status !== "running") return "";
-		const c = monitorState.config;
-		const header = `Monitoring https://${c.host}/${c.owner}/${c.repo}/pull/${c.number} (mode: ${c.mode}, interval: ${c.intervalSec}s)`;
-		if (!lastStatus) {
-			return `${header}\nNo status update received yet.`;
+		if (monitors.size === 0) return "";
+		const lines: string[] = [];
+		for (const mon of monitors.values()) {
+			const c = mon.config;
+			const header = `Monitoring https://${c.host}/${c.owner}/${c.repo}/pull/${c.number} (mode: ${c.mode}, interval: ${c.intervalSec}s)`;
+			if (!mon.lastStatus) {
+				lines.push(`${header}\n  No status update received yet.`);
+			} else {
+				const ts = mon.lastStatusTimestamp ? mon.lastStatusTimestamp.toLocaleString() : "unknown";
+				const status = formatActionableItems(mon.lastStatus, c);
+				if (status) {
+					lines.push(`${header}\n  ${status.replace(/\n/g, "\n  ")}\n  Last checked: ${ts}`);
+				} else {
+					lines.push(`${header}\n  ✨ No issues, all clear (last checked: ${ts})`);
+				}
+			}
 		}
-		const ts = lastStatusTimestamp ? lastStatusTimestamp.toLocaleString() : "unknown";
-		const status = formatActionableItems(lastStatus, c);
-		if (status) {
-			return `${header}\n${status}\nLast checked: ${ts}`;
-		}
-		return `${header}\n✨ No issues, all clear (last checked: ${ts})`;
+		return lines.join("\n\n");
 	}
 
 	// -----------------------------------------------------------------------
@@ -583,70 +646,85 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	// -----------------------------------------------------------------------
 
 	pi.registerCommand("ghpr-monitor", {
-		description: "Monitor a PR: /ghpr-monitor [PR URL] [message] — leave blank to let the agent figure it out, /ghpr-monitor check — check now, /ghpr-monitor debug — toggle debug logging, /ghpr-monitor off — stop",
+		description: "Monitor PRs: /ghpr-monitor [PR URL] [message] — /ghpr-monitor check [PR] — /ghpr-monitor off [PR] — leave blank to let the agent figure it out",
 		getArgumentCompletions: (prefix: string) => {
-			const completions = ["on", "off", "stop", "check", "debug", "https://github.com"];
+			const completions = ["on", "off", "stop", "check", "https://github.com"];
+			// Add currently monitored PRs as completions for off/check
+			for (const key of monitors.keys()) {
+				completions.push(key);
+			}
 			return completions.filter((c) => c.startsWith(prefix)).map((c) => ({ value: c, label: c }));
 		},
 		handler: async (args, ctx) => {
 			uiCtx = ctx.ui;
 			const raw = args.trim();
-			const lower = raw.toLowerCase();
 
-			if (lower === "off" || lower === "stop") {
-				const msg = stopMonitor();
-				ctx.ui.notify(msg, "info");
-				return;
-			}
-
-			if (lower === "debug" || lower === "debug on") {
-				const logFilePath = enableDebug();
-				ctx.ui.notify(`Debug logging enabled: ${logFilePath}`, "info");
-				return;
-			}
-
-			if (lower === "debug off") {
-				const formerPath = disableDebug();
-				if (formerPath) {
-					ctx.ui.notify(`Debug logging disabled. Log saved: ${formerPath}`, "info");
-			} else {
-					ctx.ui.notify("Debug logging was not active.", "info");
-				}
-				return;
-			}
-
-			if (lower === "check") {
-				if (monitorState.status !== "running") {
-					ctx.ui.notify("No monitor running. Start one first with /ghpr-monitor <PR URL>", "warning");
+			// Parse: off [PR identifier]
+			if (raw.toLowerCase().startsWith("off") || raw.toLowerCase().startsWith("stop")) {
+				const rest = raw.replace(/^(off|stop)\s*/i, "").trim();
+				if (!rest) {
+					const msg = stopAllMonitors();
+					ctx.ui.notify(msg, "info");
 					return;
 				}
-				// Reset backoff so the next poll happens at the base interval
-				backoffSec = 0;
-				consecutiveNoChange = 0;
-				forceNotify = true;
-				log("Force check triggered via /ghpr-monitor command");
-				// Wake the poll loop immediately
-				if (pollWakeResolve) {
-					pollWakeResolve();
-					pollWakeResolve = null;
+				// Try to identify a specific PR
+				const targetKey = resolveMonitorKey(rest);
+				if (targetKey) {
+					const msg = stopMonitorByKey(targetKey);
+					ctx.ui.notify(msg, "info");
+				} else {
+					ctx.ui.notify(`Unknown PR: ${rest}. Currently monitoring: ${[...monitors.keys()].join(", ") || "none"}`, "warning");
 				}
-				const c = monitorState.config;
-				ctx.ui.notify(`Checking ${c.owner}/${c.repo}#${c.number} now...`, "info");
 				return;
 			}
 
-			if (lower === "on" || raw === "") {
-				if (monitorState.status === "running") {
-					// Already monitoring — just show current status
+			// Parse: check [PR identifier]
+			if (raw.toLowerCase() === "check" || raw.toLowerCase().startsWith("check ")) {
+				const rest = raw.replace(/^check\s*/i, "").trim();
+				if (monitors.size === 0) {
+					ctx.ui.notify("No monitors running. Start one first with /ghpr-monitor <PR URL>", "warning");
+					return;
+				}
+				if (!rest) {
+					// Check all monitors
+					for (const mon of monitors.values()) {
+						mon.backoffSec = 0;
+						mon.consecutiveNoChange = 0;
+						mon.forceNotify = true;
+						if (mon.pollWakeResolve) {
+							mon.pollWakeResolve();
+							mon.pollWakeResolve = null;
+						}
+					}
+					ctx.ui.notify(`Checking all ${monitors.size} monitor(s)...`, "info");
+				} else {
+					const targetKey = resolveMonitorKey(rest);
+					if (targetKey && monitors.has(targetKey)) {
+						const mon = monitors.get(targetKey)!;
+						mon.backoffSec = 0;
+						mon.consecutiveNoChange = 0;
+						mon.forceNotify = true;
+						if (mon.pollWakeResolve) {
+							mon.pollWakeResolve();
+							mon.pollWakeResolve = null;
+						}
+						ctx.ui.notify(`Checking ${targetKey} now...`, "info");
+					} else {
+						ctx.ui.notify(`Unknown PR: ${rest}. Currently monitoring: ${[...monitors.keys()].join(", ")}`, "warning");
+					}
+				}
+				return;
+			}
+
+			if (raw.toLowerCase() === "on" || raw === "") {
+				if (monitors.size > 0) {
 					const statusText = formatCurrentStatus();
 					ctx.ui.notify(statusText, "info");
 					return;
 				}
-				// No args and no monitor running — ask the agent to invoke the tool
-				// so it can figure out the PR from conversation context
 				pi.sendUserMessage(
 					"The user wants to start PR monitoring but didn't provide a PR URL. Please invoke the ghpr-monitor tool with action='start' and the appropriate parameters (url, or owner+repo+pr_number) based on the PR you have been working on.",
-					{deliverAs: "steer"},
+					{ deliverAs: "steer" },
 				);
 				return;
 			}
@@ -656,10 +734,6 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			if (parsed) {
 				const urlMatch = raw.trim().match(PR_URL_RE);
 				const afterUrl = urlMatch ? raw.trim().slice(urlMatch[0].length).trim() : "";
-				// Only treat trailing text as a steer message if it's NOT a URL
-				// continuation (path segments, query params, fragments).
-				// e.g. "/changes", "/files", "?expand=1", "#discussion_r1"
-				// are part of the GitHub URL, not user messages.
 				const steerMessage = afterUrl && !/^[\/?#]/.test(afterUrl) ? afterUrl : undefined;
 
 				const config: MonitorConfig = {
@@ -671,15 +745,19 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					intervalSec: 60,
 					debounceSec: 30,
 				};
-				const msg = startMonitor(config);
-				ctx.ui.notify(msg, "success");
+				const result = startMonitor(config);
+				if (result.alreadyMonitoring) {
+					ctx.ui.notify(result.message, "warning");
+				} else {
+					ctx.ui.notify(result.message, "success");
+				}
 				if (steerMessage) {
-					pi.sendUserMessage(steerMessage, {deliverAs: "steer"});
+					pi.sendUserMessage(steerMessage, { deliverAs: "steer" });
 				}
 				return;
 			}
 
-			// Try parsing as "owner/repo#number" (e.g. "mobilityhouse/vgi-na-masscec#373")
+			// Try parsing as "owner/repo#number"
 			const shorthand = parsePRShorthand(raw);
 			if (shorthand) {
 				const config: MonitorConfig = {
@@ -691,8 +769,12 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					intervalSec: 60,
 					debounceSec: 30,
 				};
-				const msg = startMonitor(config);
-				ctx.ui.notify(msg, "success");
+				const result = startMonitor(config);
+				if (result.alreadyMonitoring) {
+					ctx.ui.notify(result.message, "warning");
+				} else {
+					ctx.ui.notify(result.message, "success");
+				}
 				return;
 			}
 
@@ -716,28 +798,57 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					intervalSec: 60,
 					debounceSec: 30,
 				};
-				const msg = startMonitor(config);
-				ctx.ui.notify(msg, "success");
+				const result = startMonitor(config);
+				if (result.alreadyMonitoring) {
+					ctx.ui.notify(result.message, "warning");
+				} else {
+					ctx.ui.notify(result.message, "success");
+				}
 				if (steerMessage) {
-					pi.sendUserMessage(steerMessage, {deliverAs: "steer"});
+					pi.sendUserMessage(steerMessage, { deliverAs: "steer" });
 				}
 				return;
 			}
 
 			ctx.ui.notify(
-				"Usage:\n  /ghpr-monitor <PR URL> [message] — paste a GH PR URL\n  /ghpr-monitor owner/repo#123\n  /ghpr-monitor owner/repo <pr-number> [message]\n  /ghpr-monitor check — check now\n  /ghpr-monitor debug — enable debug logging\n  /ghpr-monitor debug off — disable debug logging\n  /ghpr-monitor off — stop monitoring",
+				"Usage:\n  /ghpr-monitor <PR URL> [message] — paste a GH PR URL\n  /ghpr-monitor owner/repo#123\n  /ghpr-monitor owner/repo <pr-number> [message]\n  /ghpr-monitor check [PR] — check now (all or specific)\n  /ghpr-monitor off [PR] — stop monitoring (all or specific)",
 				"info",
 			);
 		},
 	});
 
 	// -----------------------------------------------------------------------
+	// Helper: resolve a user-supplied string to an existing monitor key
+	// -----------------------------------------------------------------------
+
+	function resolveMonitorKey(input: string): string | null {
+		const trimmed = input.trim();
+
+		// Direct key match (e.g. "owner/repo#123")
+		if (monitors.has(trimmed)) return trimmed;
+
+		// Try parsing as PR URL
+		const parsed = parsePRUrl(trimmed) || parsePRShorthand(trimmed);
+		if (parsed) {
+			const key = prKey(parsed.owner, parsed.repo, parsed.number, parsed.host);
+			if (monitors.has(key)) return key;
+		}
+
+		// Try partial match (e.g. just the number)
+		for (const key of monitors.keys()) {
+			if (key.endsWith(`#${trimmed}`) || key === trimmed) return key;
+		}
+
+		return null;
+	}
+
+	// -----------------------------------------------------------------------
 	// Register the ghpr-monitor tool (LLM-callable)
 	// -----------------------------------------------------------------------
 
 	const GhprMonitorParams = Type.Object({
-		action: StringEnum(["start", "status", "check"] as const, {
-			description: "Action: start monitoring, check current status, or trigger an immediate poll",
+		action: StringEnum(["start", "status", "check", "stop"] as const, {
+			description: "Action: start monitoring, check current status, trigger an immediate poll, or stop monitoring a specific PR",
 		}),
 		url: Type.Optional(Type.String({ description: "GitHub PR URL (e.g. https://github.com/owner/repo/pull/123) or shorthand (e.g. owner/repo#123). Alternative to owner+repo+pr_number." })),
 		owner: Type.Optional(Type.String({ description: "Repository owner (e.g. 'v2nic')" })),
@@ -755,12 +866,15 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		name: "ghpr-monitor",
 		label: "GH PR Monitor",
 		description:
-			"Monitor a GitHub pull request for comments, conflicts, and CI status changes. Use action='start' with a 'url' (GitHub PR URL) or with owner+repo+pr_number to begin monitoring. Use action='status' to check current monitoring state. Use action='check' to trigger an immediate poll. Monitoring continues until the user stops it with /ghpr-monitor off. Updates are injected as notifications so you can address issues.",
-		promptSnippet: "Monitor a GitHub PR for changes (comments, conflicts, CI failures)",
+			"Monitor GitHub pull requests for comments, conflicts, and CI status changes. Supports monitoring multiple PRs simultaneously. Use action='start' with a 'url' (GitHub PR URL) or with owner+repo+pr_number to begin monitoring. Use action='status' to list all currently monitored PRs. Use action='check' to trigger an immediate poll. Use action='stop' with url or owner+repo+pr_number to stop monitoring a specific PR. Use /ghpr-monitor off to stop all monitors.",
+		promptSnippet: "Monitor GitHub PRs for changes (comments, conflicts, CI failures)",
 		promptGuidelines: [
 			"When the user asks you to watch or monitor a PR, use ghpr-monitor with action='start'.",
+			"Multiple PRs can be monitored at the same time — start a new monitor without stopping existing ones.",
 			"Accept a GitHub PR URL, shorthand like 'owner/repo#123', or separate owner/repo/pr_number.",
-			"Monitoring runs until the user stops it with /ghpr-monitor off.",
+			"Use action='status' to see all currently monitored PRs.",
+			"Use action='stop' with url/owner/repo/pr_number to stop a specific PR monitor.",
+			"Monitoring runs until stopped via action='stop', /ghpr-monitor off, or the PR is merged/closed.",
 			"The user can run /ghpr-monitor check to trigger an immediate poll.",
 			"You will receive PR status updates as notifications.",
 		],
@@ -768,142 +882,189 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			uiCtx = _ctx.ui;
+
+			// Helper: resolve PR identity from url or explicit params
+			function resolvePR(): { owner: string; repo: string; number: number; host: string } | { error: string } {
+				let resolvedOwner: string | undefined;
+				let resolvedRepo: string | undefined;
+				let resolvedNumber: number | undefined;
+				let resolvedHost = "github.com";
+
+				if (params.url) {
+					const parsed = parsePRUrl(params.url) || parsePRShorthand(params.url);
+					if (!parsed) {
+						return { error: `Invalid PR URL or shorthand: ${params.url}. Expected format: https://github.com/owner/repo/pull/123 or owner/repo#123` };
+					}
+					resolvedOwner = parsed.owner;
+					resolvedRepo = parsed.repo;
+					resolvedNumber = parsed.number;
+					resolvedHost = parsed.host;
+				} else {
+					resolvedOwner = params.owner;
+					resolvedRepo = params.repo;
+					resolvedNumber = params.pr_number;
+				}
+
+				if (!resolvedOwner || !resolvedRepo || !resolvedNumber) {
+					return {
+						error: [
+							"Missing required parameters.",
+							"",
+							"Usage:",
+							"  ghpr-monitor(action='start', url='https://github.com/owner/repo/pull/123')",
+							"  ghpr-monitor(action='start', url='owner/repo#123')",
+							"  ghpr-monitor(action='start', owner='v2nic', repo='gh-pr-review', pr_number=42)",
+							"  ghpr-monitor(action='stop', url='owner/repo#123')",
+							"  ghpr-monitor(action='status') — list all monitored PRs",
+						].join("\n"),
+					};
+				}
+
+				return { owner: resolvedOwner, repo: resolvedRepo, number: resolvedNumber, host: resolvedHost };
+			}
+
 			switch (params.action) {
 				case "start": {
-					if (monitorState.status === "running") {
-						const c = monitorState.config;
+					const resolved = resolvePR();
+					if ("error" in resolved) {
 						return {
-							content: [
-								{
-									type: "text",
-									text: `Already monitoring https://${c.host}/${c.owner}/${c.repo}/pull/${c.number}. Use /ghpr-monitor off to stop.`,
-								},
-							],
-							details: { action: "start", status: "already_running", config: monitorState.config },
-						};
-					}
-
-					// Resolve owner/repo/number from url or explicit params
-					let resolvedOwner: string | undefined;
-					let resolvedRepo: string | undefined;
-					let resolvedNumber: number | undefined;
-					let resolvedHost = "github.com";
-
-					if (params.url) {
-						const parsed = parsePRUrl(params.url) || parsePRShorthand(params.url);
-						if (!parsed) {
-							return {
-								content: [{ type: "text", text: `Invalid PR URL or shorthand: ${params.url}. Expected format: https://github.com/owner/repo/pull/123 or owner/repo#123` }],
-								details: { action: "start", status: "invalid_url" },
-							};
-						}
-						resolvedOwner = parsed.owner;
-						resolvedRepo = parsed.repo;
-						resolvedNumber = parsed.number;
-						resolvedHost = parsed.host;
-					} else {
-						resolvedOwner = params.owner;
-						resolvedRepo = params.repo;
-						resolvedNumber = params.pr_number;
-					}
-
-					if (!resolvedOwner || !resolvedRepo || !resolvedNumber) {
-						return {
-							content: [
-								{
-									type: "text",
-									text: [
-										"Missing required parameters for action='start'.",
-										"",
-										"Usage:",
-										"  ghpr-monitor(action='start', url='https://github.com/owner/repo/pull/123')",
-										"  ghpr-monitor(action='start', url='owner/repo#123')",
-										"  ghpr-monitor(action='start', owner='v2nic', repo='gh-pr-review', pr_number=42)",
-										"",
-										"Parameters:",
-										"  url        GitHub PR URL or shorthand (e.g. 'owner/repo#123'), alternative to owner+repo+pr_number",
-										"  owner      Repository owner",
-										"  repo       Repository name",
-										"  pr_number  Pull request number",
-										"  mode       Watch mode: all, comments, conflicts, actions (default: all)",
-										"  interval   Polling interval in seconds (default: 60, min: 10)",
-										"",
-
-										"Other action:",
-										"  ghpr-monitor(action='status') — check current state",
-									].join("\n"),
-								},
-							],
+							content: [{ type: "text", text: resolved.error }],
 							details: { action: "start", status: "missing_params" },
 						};
 					}
 
 					const config: MonitorConfig = {
-						owner: resolvedOwner,
-						repo: resolvedRepo,
-						number: resolvedNumber,
-						host: resolvedHost,
+						owner: resolved.owner,
+						repo: resolved.repo,
+						number: resolved.number,
+						host: resolved.host,
 						mode: params.mode || "all",
 						intervalSec: Math.max(10, params.interval || 60),
 						debounceSec: 30,
 					};
 
-					const msg = startMonitor(config);
+					const result = startMonitor(config);
 					return {
-						content: [{ type: "text", text: msg }],
-						details: { action: "start", status: "started", config },
+						content: [{ type: "text", text: result.message }],
+						details: {
+							action: "start",
+							status: result.alreadyMonitoring ? "already_running" : "started",
+							config,
+							activeMonitors: monitors.size,
+						},
 					};
 				}
 
 				case "status": {
-					if (monitorState.status === "idle") {
+					if (monitors.size === 0) {
 						return {
-							content: [{ type: "text", text: "No PR monitor is currently active." }],
-							details: { action: "status", status: "idle" },
+							content: [{ type: "text", text: "No PR monitors are currently active." }],
+							details: { action: "status", status: "idle", activeMonitors: 0 },
 						};
 					}
-					if (monitorState.status === "running") {
-						const c = monitorState.config;
-						const ts = lastStatusTimestamp ? lastStatusTimestamp.toLocaleString() : "unknown";
-						const statusLine = lastStatus
-							? `\nLast update: ${lastStatus.unresolvedThreads} unresolved threads, ${lastStatus.generalComments} comments, conflicts: ${lastStatus.hasConflicts}, failing: ${lastStatus.failingChecks.join(", ") || "none"}\nLast checked: ${ts}`
-							: "\nNo status update received yet.";
-						return {
-							content: [
-								{
-									type: "text",
-									text: `Monitoring ${c.owner}/${c.repo}#${c.number} (mode: ${c.mode}, interval: ${c.intervalSec}s)${statusLine}`,
-								},
-							],
-							details: { action: "status", status: "running", config: c, lastStatus, lastStatusTimestamp },
-						};
+
+					const lines: string[] = [`Monitoring ${monitors.size} PR(s):`];
+					for (const [key, mon] of monitors) {
+						const c = mon.config;
+						const ts = mon.lastStatusTimestamp ? mon.lastStatusTimestamp.toLocaleString() : "unknown";
+						if (mon.lastStatus) {
+							const statusLine = `${key}: ${mon.lastStatus.unresolvedThreads} unresolved threads, ${mon.lastStatus.generalComments} comments, conflicts: ${mon.lastStatus.hasConflicts}, failing: ${mon.lastStatus.failingChecks.join(", ") || "none"} (last checked: ${ts})`;
+							lines.push(statusLine);
+						} else {
+							lines.push(`${key}: No status update received yet.`);
+						}
 					}
+
 					return {
-						content: [{ type: "text", text: `Monitor state: ${monitorState.status}` }],
-						details: { action: "status", status: monitorState.status },
+						content: [{ type: "text", text: lines.join("\n") }],
+						details: {
+							action: "status",
+							status: "running",
+							activeMonitors: monitors.size,
+							monitors: [...monitors.entries()].map(([key, mon]) => ({
+								key,
+								config: mon.config,
+								lastStatus: mon.lastStatus,
+								lastStatusTimestamp: mon.lastStatusTimestamp,
+							})),
+						},
 					};
 				}
 
 				case "check": {
-					if (monitorState.status !== "running") {
+					if (monitors.size === 0) {
 						return {
-							content: [{ type: "text", text: "No monitor is currently active. Start one first with action='start'." }],
+							content: [{ type: "text", text: "No monitors are currently active. Start one first with action='start'." }],
 							details: { action: "check", status: "idle" },
 						};
 					}
-					// Reset backoff and wake the poll loop
-					backoffSec = 0;
-					consecutiveNoChange = 0;
-					forceNotify = true;
-					log("Force check triggered via ghpr-monitor tool");
-					if (pollWakeResolve) {
-						pollWakeResolve();
-						pollWakeResolve = null;
+
+					// If a specific PR is specified, only check that one
+					if (params.url || params.owner) {
+						const resolved = resolvePR();
+						if ("error" in resolved) {
+							return {
+								content: [{ type: "text", text: resolved.error }],
+								details: { action: "check", status: "missing_params" },
+							};
+						}
+						const key = prKey(resolved.owner, resolved.repo, resolved.number, resolved.host);
+						const mon = monitors.get(key);
+						if (!mon) {
+							return {
+								content: [{ type: "text", text: `Not monitoring ${key}. Currently monitoring: ${[...monitors.keys()].join(", ")}` }],
+								details: { action: "check", status: "not_found" },
+							};
+						}
+						mon.backoffSec = 0;
+						mon.consecutiveNoChange = 0;
+						mon.forceNotify = true;
+						if (mon.pollWakeResolve) {
+							mon.pollWakeResolve();
+							mon.pollWakeResolve = null;
+						}
+						return {
+							content: [{ type: "text", text: `Checking ${key} now...` }],
+							details: { action: "check", status: "triggered", config: mon.config },
+						};
 					}
-					const c = monitorState.config;
+
+					// Check all monitors
+					for (const mon of monitors.values()) {
+						mon.backoffSec = 0;
+						mon.consecutiveNoChange = 0;
+						mon.forceNotify = true;
+						if (mon.pollWakeResolve) {
+							mon.pollWakeResolve();
+							mon.pollWakeResolve = null;
+						}
+					}
 					return {
-						content: [{ type: "text", text: `Checking ${c.owner}/${c.repo}#${c.number} now...` }],
-						details: { action: "check", status: "triggered", config: c },
+						content: [{ type: "text", text: `Checking all ${monitors.size} monitor(s)...` }],
+						details: { action: "check", status: "triggered_all", activeMonitors: monitors.size },
+					};
+				}
+
+				case "stop": {
+					const resolved = resolvePR();
+					if ("error" in resolved) {
+						return {
+							content: [{ type: "text", text: resolved.error }],
+							details: { action: "stop", status: "missing_params" },
+						};
+					}
+					const key = prKey(resolved.owner, resolved.repo, resolved.number, resolved.host);
+					if (!monitors.has(key)) {
+						const currentlyMonitoring = [...monitors.keys()];
+						return {
+							content: [{ type: "text", text: `Not monitoring ${key}. Currently monitoring: ${currentlyMonitoring.join(", ") || "none"}` }],
+							details: { action: "stop", status: "not_found", currentlyMonitoring },
+						};
+					}
+					const msg = stopMonitorByKey(key);
+					return {
+						content: [{ type: "text", text: msg }],
+						details: { action: "stop", status: "stopped", key, remainingMonitors: monitors.size },
 					};
 				}
 

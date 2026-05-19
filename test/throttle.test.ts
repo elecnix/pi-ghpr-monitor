@@ -270,9 +270,9 @@ describe("Update throttling state machine", () => {
 		expect(messages).toEqual(["⚠️ Merge conflict", "⏳ Pending checks"]);
 	});
 
-	it("stopMonitor should reset state (design contract)", () => {
+	it("stopMonitorByKey removes the monitor entry (design contract)", () => {
 		// This documents the expected behavior:
-		// When stopMonitor is called, the monitoring loop stops and
+		// When stopMonitorByKey is called, the monitoring loop stops and
 		// the state should be reset so fresh updates work on next start.
 		// The implementation uses lastStatus = null to achieve this.
 		const testConfig: MonitorConfig = {
@@ -293,7 +293,7 @@ describe("Update throttling state machine", () => {
 			lastCommentTimestamp: "2024-01-01T00:00:00Z",
 			lastCommentBySelf: false,
 		};
-		// After stopMonitor, lastStatus is set to null
+		// After stopMonitorByKey, the entry is removed from the map
 		// This means next poll will report issues as if first time
 		const nextStart = formatStatusUpdate(null, prev, testConfig);
 		expect(nextStart).toContain("Failing CI checks");
@@ -319,7 +319,7 @@ describe("Tool action enum", () => {
 		expect(actions).toContain("start");
 		expect(actions).toContain("status");
 		expect(actions).toContain("check");
-		expect(actions).not.toContain("stop");
+		expect(actions).toContain("stop"); // stop action is now valid for specific PR monitors
 	});
 
 	it("steering prompt describes monitoring behavior", () => {
