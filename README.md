@@ -113,7 +113,7 @@ The extension uses `gh api graphql` to poll the PR at a configurable interval (d
 - **General comments** — including bot comments (filterable via 👍 reaction)
 - **PR state** — merged or closed PRs trigger automatic shutdown
 
-When conditions change between polls, it formats a human-readable update and delivers it to the agent via `pi.sendUserMessage()` so it reaches the LLM even on fresh sessions.
+When conditions change between polls, it formats a human-readable update and delivers it to the agent via `pi.sendUserMessage()` so it reaches the LLM even on fresh sessions. A concise summary is also shown in the TUI via a custom message renderer registered for the `ghpr-monitor` custom type.
 
 ## Configuration
 

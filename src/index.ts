@@ -305,8 +305,27 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		setSessionId(id);
 	});
 
-	/** Send a PR status notification with enriched content for the agent and concise summary for the TUI. */
+	/**
+	 * Send a PR status notification with enriched content.
+	 *
+	 * Uses TWO delivery mechanisms to ensure both the agent and the TUI receive it:
+	 * 1. pi.sendUserMessage(detailed) — delivers the full content to the LLM agent.
+	 *    CustomMessage (pi.sendMessage) only renders in the TUI; the agent never sees it.
+	 *    This was the root cause of the regression where notifications appeared in the
+	 *    TUI but the agent did not react.
+	 * 2. pi.sendMessage(customType: ghpr-monitor) — renders the concise summary in
+	 *    the TUI via the registered message renderer.
+	 */
 	function sendPRNotification(concise: string, detailed: string, options?: { deliverAs?: "steer" | "followUp" }) {
+		// Deliver detailed content to the agent via user message.
+		// pi.sendUserMessage() creates a UserMessage that is injected into the
+		// LLM conversation context, ensuring the coding agent can see and act on it.
+		// This is the ONLY reliable way to deliver content to the agent;
+		// pi.sendMessage() with customType only renders in the TUI.
+		pi.sendUserMessage(detailed, { deliverAs: options?.deliverAs ?? "steer" });
+
+		// Render the concise summary in the TUI via the custom message renderer.
+		// The renderer extracts message.details.concise and shows the short version.
 		pi.sendMessage({
 			customType: "ghpr-monitor",
 			content: detailed,

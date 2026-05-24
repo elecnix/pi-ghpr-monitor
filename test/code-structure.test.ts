@@ -95,6 +95,28 @@ describe("multi-PR monitoring architecture", () => {
 	});
 });
 
+describe("sendPRNotification delivers to agent via pi.sendUserMessage", () => {
+	it("sendPRNotification uses both pi.sendUserMessage and pi.sendMessage", () => {
+		// The fix for the regression where pi.sendMessage() alone only
+		// showed notifications in the TUI but the agent didn't see them.
+		// pi.sendUserMessage() ensures the LLM receives the notification
+		// content in its context. pi.sendMessage() renders the concise
+		// version in the TUI via the custom message renderer.
+		expect(src).toContain("pi.sendUserMessage(detailed");
+		expect(src).toContain("pi.sendMessage({");
+		expect(src).toContain("customType: \"ghpr-monitor\"");
+	});
+
+	it("sendPRNotification passes deliverAs to pi.sendUserMessage", () => {
+		const fnStart = src.indexOf("function sendPRNotification(");
+		expect(fnStart).toBeGreaterThan(-1);
+		const fnEnd = src.indexOf("\n\t}\n", fnStart);
+		const fnBody = src.slice(fnStart, fnEnd + 1);
+		// The deliverAs option must be forwarded to pi.sendUserMessage
+		expect(fnBody).toMatch(/pi\.sendUserMessage\(.*deliverAs/);
+	});
+});
+
 describe("forceNotify fix", () => {
 	it("forceNotify is per-monitor state in ActiveMonitor", () => {
 		expect(src).toContain("forceNotify: boolean");
