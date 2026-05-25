@@ -393,7 +393,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	// -----------------------------------------------------------------------
 
 	function startMonitor(config: MonitorConfig): { key: string; message: string; alreadyMonitoring?: boolean } {
-		log(\`Starting monitor: \${config.owner}/\${config.repo}#\${config.number} (interval: \${config.intervalSec}s, mode: \${config.mode})\`);
+		log(`Starting monitor: ${config.owner}/${config.repo}#${config.number} (interval: ${config.intervalSec}s, mode: ${config.mode})`);
 		const key = prKey(config);
 
 		if (monitors.has(key)) {
