@@ -186,10 +186,8 @@ function buildContextMap(source: string): Context[] {
 					}
 					// Nested template literal inside ${}
 					if (tc === "`") {
-						// Recursively classify the entire nested template
-						// by building its context starting from this position
-						const innerStart = i;
-						// Mark the opening backtick as template
+						// Recursively classify nested template inside ${}
+						// All characters (including ${ and } delimiters) get context values.
 						contexts[i] = "template";
 						i++;
 						let innerDepth = 0;
@@ -198,11 +196,14 @@ function buildContextMap(source: string): Context[] {
 							const inext = i + 1 < len ? source[i + 1] : "";
 							if (ic === "$" && inext === "{" && innerDepth === 0) {
 								innerDepth++;
+								contexts[i] = "template"; // $
+								contexts[i + 1] = "template"; // {
 								i += 2;
 								continue;
 							}
 							if (ic === "}" && innerDepth > 0) {
 								innerDepth--;
+								contexts[i] = "template"; // }
 								i++;
 								continue;
 							}
@@ -372,6 +373,68 @@ describe("Source file has no escaped template literal characters", () => {
 		}
 	});
 
+	it("AWAIT_QUERY GraphQL has balanced braces", () => {
+		// The AWAIT_QUERY is a template literal containing a GraphQL query.
+		// If braces are unbalanced, GitHub's GraphQL API returns:
+		//   Expected NAME, actual: (none) ("") at [N, 1]
+		// The bug: a multi-PR merge introduced the reviewThreads section with
+		// only 2 closing braces for 3 opened levels (reviewThreads > nodes > comments).
+		const match = src.match(/const AWAIT_QUERY = \x60([\s\S]*?)\x60;/);
+		if (!match) throw new Error("Could not find AWAIT_QUERY in source");
+		const query = match[1];
+
+		// Track brace depth, ignoring braces inside strings
+		let depth = 0;
+		let inString = false;
+		let stringChar = "";
+		const depths: { line: number; col: number; depth: number; opener: string }[] = [];
+		const stack: { line: number; col: number; opener: string }[] = [];
+
+		for (let i = 0; i < query.length; i++) {
+			const ch = query[i];
+			const line = query.substring(0, i).split("\n").length;
+			const lineStart = query.lastIndexOf("\n", i) + 1;
+			const col = i - lineStart + 1;
+
+			if (inString) {
+				if (ch === "\\") { i++; continue; }
+				if (ch === stringChar) inString = false;
+				continue;
+			}
+			if (ch === '"' || ch === "'") {
+				inString = true;
+				stringChar = ch;
+				continue;
+			}
+			if (ch === '{') {
+				depth++;
+				stack.push({ line, col, opener: query.substring(Math.max(0, i - 30), i + 1).trim() });
+				depths.push({ line, col, depth, opener: stack[stack.length - 1].opener });
+			}
+			if (ch === '}') {
+				if (stack.length === 0) {
+					throw new Error(
+						"Unexpected closing brace in AWAIT_QUERY at line " + line +
+						", col " + col + ". No matching opening brace."
+					);
+				}
+				const opener = stack.pop()!;
+				depth--;
+			}
+		}
+
+		if (depth !== 0) {
+			const unclosed = stack.map(
+				(s) => "Line " + s.line + ", col " + s.col + ": opened by '" + s.opener + "' (never closed)"
+			);
+			throw new Error(
+				"AWAIT_QUERY has unbalanced braces (" + depth + " unclosed). " +
+				"GitHub's GraphQL API would reject this with 'Expected NAME' error.\n" +
+				"Unclosed openings:\n" + unclosed.join("\n")
+			);
+		}
+	});
+
 	it("has valid template literal syntax (backticks are properly paired)", { timeout: 10000 }, () => {
 		// Verify that the source file has matching backtick pairs by scanning
 		// through the context map. Backticks inside strings and comments are
@@ -384,12 +447,17 @@ describe("Source file has no escaped template literal characters", () => {
 			if (contextMap[i] === "string" || contextMap[i] === "comment") continue;
 
 			if (src[i] === "`") {
-				// Check if this backtick is escaped (preceded by backslash
-				// that's not itself escaped — only in code or template context)
-				if (i > 0 && src[i - 1] === "\\" && contextMap[i - 1] === ("code" as Context)) {
-					// Escaped backtick in code context — this is a bug,
-					// but it's caught by the backslash-backtick test above.
-					// Skip it here to avoid miscounting.
+				// Check if this backtick is escaped (preceded by backslash).
+				// Escaped backticks (\`) are valid inside template literals and
+				// single/double-quoted strings — they don't open or close templates.
+				// The context map already classifies the backslash, so check the
+				// position before it to determine if it's an escape sequence.
+				if (i > 0 && src[i - 1] === "\\" && contextMap[i - 1] !== "code") {
+					// The backtick is preceded by \ that is NOT in code context.
+					// In template/string context, \` is an escape sequence —
+					// the backtick is literal, not a delimiter. Skip it.
+					// (In code context, \` would be flagged by the
+					// backslash-backtick test as a bug, so we also skip it.)
 					continue;
 				}
 
