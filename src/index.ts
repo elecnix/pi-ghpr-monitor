@@ -534,6 +534,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				const curr = snapshotPR(pr);
 				const update = formatStatusUpdate(mon.lastStatus, curr, config);
 				const hadChange = update.length > 0;
+				let updateSentThisCycle = false;
 
 				if (update) {
 					if (agentTurnActive) {
@@ -546,11 +547,14 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 						mon.lastSentUpdate = update;
 						mon.lastSentReminder = null; // real update supersedes any prior reminder
 						mon.lastNudgeTime = Date.now();
+						updateSentThisCycle = true;
 					}
 				}
 
 				// If agent just went idle and actionable items remain, send a reminder
-				if (mon.needsReminder && !agentTurnActive) {
+				// — but skip if a status update was already sent this cycle to avoid
+				//   duplicate content (e.g. first-poll overlap when lastStatus is null)
+				if (!updateSentThisCycle && mon.needsReminder && !agentTurnActive) {
 					const reminder = formatActionableItems(curr, config);
 					if (reminder && reminder !== mon.lastSentReminder) {
 						const detReminder = formatAgentNotification(curr, config); sendPRNotification(reminder, detReminder?.detailed ?? reminder, {deliverAs: "steer"});
