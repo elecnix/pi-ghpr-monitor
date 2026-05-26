@@ -99,12 +99,23 @@ describe("Agent notification delivery uses pi.sendUserMessage()", () => {
 		expect(fnBody!).toMatch(/pi\.sendUserMessage\(\s*detailed/);
 	});
 
-	it("sendPRNotification also uses pi.sendMessage() for TUI rendering", () => {
+	it("sendPRNotification uses pi.sendMessage() with display:false when delivering to agent", () => {
 		const fnBody = extractFunctionBody(src, "sendPRNotification");
 		expect(fnBody).not.toBeNull();
 
-		// The concise content should also be sent via pi.sendMessage() for
-		// TUI rendering with the custom renderer.
+		// When sendUserMessage is also called (delivery is set), the CustomMessage
+		// should use display:!delivery (false) to avoid a duplicate visible message.
+		// The UserMessage from sendUserMessage is already visible in the TUI,
+		// so the CustomMessage should be hidden in the TUI to prevent duplicates.
+		expect(fnBody!).toContain("display: !delivery");
+	});
+
+	it("sendPRNotification also uses pi.sendMessage() for state tracking", () => {
+		const fnBody = extractFunctionBody(src, "sendPRNotification");
+		expect(fnBody).not.toBeNull();
+
+		// pi.sendMessage() with customType must still be called for session state
+		// tracking and event sourcing, even when display is false.
 		expect(fnBody!).toContain("pi.sendMessage(");
 		expect(fnBody!).toContain("customType");
 	});
@@ -166,24 +177,26 @@ describe("All notification paths use sendPRNotification for agent delivery", () 
 	});
 });
 
-describe("pi.sendMessage() with customType is retained for TUI rendering", () => {
-	it("initial monitoring message uses pi.sendMessage() (TUI-only)", () => {
+describe("pi.sendMessage() with customType is retained for TUI-only messages", () => {
+	it("initial monitoring message uses pi.sendMessage() with display:true (TUI-only, no UserMessage)", () => {
 		const initialIdx = src.indexOf("📡 Monitoring");
 		expect(initialIdx).toBeGreaterThan(-1);
 
 		const nearby = src.slice(Math.max(0, initialIdx - 200), initialIdx + 400);
 		expect(nearby).toContain("pi.sendMessage(");
+		// The initial monitoring message does not have a corresponding UserMessage,
+		// so it should use display: true to be visible in the TUI
+		expect(nearby).toContain("display: true");
 	});
 
-	it("error messages use pi.sendMessage() (TUI-only)", () => {
+	it("error messages use pi.sendMessage() with display:true (TUI-only, no UserMessage)", () => {
 		// Error messages are for the TUI only — search for ghpr-monitor-error
 		const errorIdx = src.indexOf("ghpr-monitor-error");
 		expect(errorIdx).toBeGreaterThan(-1);
 
-		// Verify that pi.sendMessage is used near the error text
-		// (search a wide range since the call may be several lines before the string)
 		const nearby = src.slice(Math.max(0, errorIdx - 200), errorIdx + 200);
 		expect(nearby).toContain("pi.sendMessage");
+		expect(nearby).toContain("display: true");
 	});
 });
 
@@ -223,5 +236,48 @@ describe("No rogue pi.sendUserMessage() calls bypass sendPRNotification", () => 
 				`pi.sendUserMessage() at index ${idx} should be inside sendPRNotification() or a steering prompt`
 			).toBe(true);
 		}
+	});
+});
+describe("Duplicate notification prevention via display flag", () => {
+	it("sendPRNotification uses display:!delivery on CustomMessage", () => {
+		const fnBody = extractFunctionBody(src, "sendPRNotification");
+		expect(fnBody).not.toBeNull();
+
+		// The CustomMessage should use display: !delivery so it's hidden when
+		// a UserMessage is also being sent (preventing visual duplicates).
+		expect(fnBody!).toContain("display: !delivery");
+	});
+
+	it("sendPRNotification does not use hardcoded display:true on CustomMessage", () => {
+		const fnBody = extractFunctionBody(src, "sendPRNotification");
+		expect(fnBody).not.toBeNull();
+
+		// Strip comments from the function body before checking for display: true
+		// to avoid false positives from docstrings that mention "display: true".
+		const codeOnly = fnBody!
+			.split("\n")
+			.filter((line: string) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
+			.join("\n");
+
+		// The code should NOT contain hardcoded display: true (which caused the bug)
+		expect(codeOnly).not.toContain("display: true");
+	});
+
+	it("non-notification pi.sendMessage calls use display:true (not conditional)", () => {
+		// The initial monitoring message and error messages are TUI-only;
+		// they don't have a corresponding UserMessage. They should always
+		// use display: true.
+		const initialIdx = src.indexOf("📡 Monitoring");
+		expect(initialIdx).toBeGreaterThan(-1);
+
+		const nearby = src.slice(Math.max(0, initialIdx - 200), initialIdx + 400);
+		// Contains display: true for the initial message
+		expect(nearby).toContain("display: true");
+
+		// Error messages also use display: true
+		const errorIdx = src.indexOf("ghpr-monitor-error");
+		expect(errorIdx).toBeGreaterThan(-1);
+		const errorNearby = src.slice(errorIdx, errorIdx + 300);
+		expect(errorNearby).toContain("display: true");
 	});
 });

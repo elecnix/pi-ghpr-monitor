@@ -314,16 +314,20 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	 * Send a PR status notification with enriched content.
 	 *
 	 * Uses TWO delivery mechanisms to ensure both the agent and the TUI receive it:
-	 * 1. pi.sendUserMessage(detailed) — delivers the full content to the LLM agent.
-	 *    CustomMessage (pi.sendMessage) only renders in the TUI; the agent never sees it.
-	 *    This was the root cause of the regression where notifications appeared in the
-	 *    TUI but the agent did not react.
-	 * 2. pi.sendMessage(customType: ghpr-monitor) — renders the concise summary in
-	 *    the TUI via the registered message renderer.
+	 * 1. pi.sendUserMessage(detailed) — creates a UserMessage that the LLM agent
+	 *    can see and act on. CustomMessage (pi.sendMessage) content is NOT injected
+	 *    into the LLM context, so sendUserMessage is required for agent delivery.
+	 *
+	 * 2. pi.sendMessage(customType: ghpr-monitor) — stores the CustomMessage in the
+	 *    session for event sourcing and rendering via the registered message renderer.
+	 *    When a UserMessage is also being sent (normal agent mode), display:false prevents
+	 *    a duplicate visible message — the UserMessage already appears in the TUI.
+	 *    In NO_AGENT mode (no UserMessage), display:true renders the CustomMessage in
+	 *    the TUI as the only visible notification.
 	 */
 	function sendPRNotification(concise: string, detailed: string, options?: { deliverAs?: "steer" | "followUp" }) {
 		const delivery = NO_AGENT ? undefined : (options?.deliverAs ?? "steer");
-		// Deliver detailed content to the agent via user message.
+		// Deliver detailed content to the agent via UserMessage.
 		// pi.sendUserMessage() creates a UserMessage that is injected into the
 		// LLM conversation context, ensuring the coding agent can see and act on it.
 		// This is the ONLY reliable way to deliver content to the agent;
@@ -332,12 +336,15 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			pi.sendUserMessage(detailed, { deliverAs: delivery });
 		}
 
-		// Render the concise summary in the TUI via the custom message renderer.
-		// The renderer extracts message.details.concise and shows the short version.
+		// Emit a CustomMessage for the registered message renderer.
+		// When a UserMessage is also being sent (delivery is set), use display:false
+		// to avoid a duplicate visible message — the UserMessage already appears in
+		// the TUI. When there is no UserMessage (NO_AGENT mode), use display:true
+		// so the CustomMessage is the visible notification.
 		pi.sendMessage({
 			customType: "ghpr-monitor",
 			content: detailed,
-			display: true,
+			display: !delivery,
 			details: { concise },
 		});
 	}
