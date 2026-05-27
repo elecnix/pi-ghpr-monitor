@@ -283,7 +283,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	// For testing: allows reducing the polling interval
 	const MOCK_INTERVAL_SECS = process.env.GHPR_MONITOR_INTERVAL_SECS ? parseInt(process.env.GHPR_MONITOR_INTERVAL_SECS, 10) : undefined;
 
-	const STEERING_PROMPT = `You have access to the ghpr-monitor tool. When the user asks you to watch or monitor a PR, use ghpr-monitor with action "start" to begin monitoring. The tool has actions: start, status, check, and stop. Multiple PRs can be monitored simultaneously. Monitoring continues until the user stops it with /ghpr-monitor off (stops all) or /ghpr-monitor off <PR> (stops specific). The user can also run /ghpr-monitor check to trigger an immediate poll (all PRs or a specific one). You will receive PR status updates as notifications. The url parameter accepts GitHub PR URLs or shorthand like "owner/repo#123".`;
+	const STEERING_PROMPT = `You have access to the ghpr-monitor tool. When the user asks you to watch or monitor a PR, use ghpr-monitor with action "start" to begin monitoring. The tool has actions: start, status, and check. Multiple PRs can be monitored simultaneously. You must NOT stop monitoring on your own — only the user can stop via /ghpr-monitor off (stops all) or /ghpr-monitor off <PR> (stops specific). The user can also run /ghpr-monitor check to trigger an immediate poll (all PRs or a specific one). You will receive PR status updates as notifications. The url parameter accepts GitHub PR URLs or shorthand like "owner/repo#123".`;
 
 	// Register a custom message renderer for "ghpr-monitor" messages.
 	// This renders only the concise summary in the TUI, while the agent
@@ -885,8 +885,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	// -----------------------------------------------------------------------
 
 	const GhprMonitorParams = Type.Object({
-		action: StringEnum(["start", "status", "check", "stop"] as const, {
-			description: "Action: start monitoring, check current status, trigger an immediate poll, or stop monitoring a specific PR",
+		action: StringEnum(["start", "status", "check"] as const, {
+			description: "Action: start monitoring, check current status, or trigger an immediate poll. Only the user can stop monitoring via /ghpr-monitor off.",
 		}),
 		url: Type.Optional(Type.String({ description: "GitHub PR URL (e.g. https://github.com/owner/repo/pull/123) or shorthand (e.g. owner/repo#123). Alternative to owner+repo+pr_number." })),
 		owner: Type.Optional(Type.String({ description: "Repository owner (e.g. 'v2nic')" })),
@@ -904,16 +904,16 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		name: "ghpr-monitor",
 		label: "GH PR Monitor",
 		description:
-			"Monitor GitHub pull requests for comments, conflicts, and CI status changes. Supports monitoring multiple PRs simultaneously. Use action='start' with a 'url' (GitHub PR URL) or with owner+repo+pr_number to begin monitoring. Use action='status' to list all currently monitored PRs. Use action='check' to trigger an immediate poll. Use action='stop' with url or owner+repo+pr_number to stop monitoring a specific PR. Use /ghpr-monitor off to stop all monitors.",
+			"Monitor GitHub pull requests for comments, conflicts, and CI status changes. Supports monitoring multiple PRs simultaneously. Use action='start' with a 'url' (GitHub PR URL) or with owner+repo+pr_number to begin monitoring. Use action='status' to list all currently monitored PRs. Use action='check' to trigger an immediate poll. The agent cannot stop monitoring — only the user can stop via /ghpr-monitor off.",
 		promptSnippet: "Monitor GitHub PRs for changes (comments, conflicts, CI failures)",
 		promptGuidelines: [
 			"When the user asks you to watch or monitor a PR, use ghpr-monitor with action='start'.",
 			"Multiple PRs can be monitored at the same time — start a new monitor without stopping existing ones.",
 			"Accept a GitHub PR URL, shorthand like 'owner/repo#123', or separate owner/repo/pr_number.",
 			"Use action='status' to see all currently monitored PRs.",
-			"Use action='stop' with url/owner/repo/pr_number to stop a specific PR monitor.",
-			"Monitoring runs until stopped via action='stop', /ghpr-monitor off, or the PR is merged/closed.",
-			"The user can run /ghpr-monitor check to trigger an immediate poll.",
+			"Use action='check' to trigger an immediate poll.",
+			"Do NOT stop monitoring on your own. Only the user can stop monitoring via /ghpr-monitor off.",
+			"Monitoring runs until the user stops it via /ghpr-monitor off, or the PR is merged/closed.",
 			"You will receive PR status updates as notifications.",
 		],
 		parameters: GhprMonitorParams,
@@ -952,7 +952,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 							"  ghpr-monitor(action='start', url='https://github.com/owner/repo/pull/123')",
 							"  ghpr-monitor(action='start', url='owner/repo#123')",
 							"  ghpr-monitor(action='start', owner='v2nic', repo='gh-pr-review', pr_number=42)",
-							"  ghpr-monitor(action='stop', url='owner/repo#123')",
+							"  ghpr-monitor(action='check') — trigger an immediate poll",
+							"  /ghpr-monitor off [PR] — stop monitoring (user only)",
 							"  ghpr-monitor(action='status') — list all monitored PRs",
 						].join("\n"),
 					};
@@ -1084,25 +1085,12 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				}
 
 				case "stop": {
-					const resolved = resolvePR();
-					if ("error" in resolved) {
-						return {
-							content: [{ type: "text", text: resolved.error }],
-							details: { action: "stop", status: "missing_params" },
-						};
-					}
-					const key = prKey(resolved.owner, resolved.repo, resolved.number, resolved.host);
-					if (!monitors.has(key)) {
-						const currentlyMonitoring = [...monitors.keys()];
-						return {
-							content: [{ type: "text", text: `Not monitoring ${key}. Currently monitoring: ${currentlyMonitoring.join(", ") || "none"}` }],
-							details: { action: "stop", status: "not_found", currentlyMonitoring },
-						};
-					}
-					const msg = stopMonitorByKey(key);
+					// The stop action is intentionally excluded from the tool's StringEnum
+					// so the LLM cannot invoke it. Only the user can stop monitoring via
+					// /ghpr-monitor off. This case remains as a safety fallback.
 					return {
-						content: [{ type: "text", text: msg }],
-						details: { action: "stop", status: "stopped", key, remainingMonitors: monitors.size },
+						content: [{ type: "text", text: "Stopping monitors is not available to the agent. The user can stop monitoring via /ghpr-monitor off." }],
+						details: { action: "stop", status: "forbidden" },
 					};
 				}
 

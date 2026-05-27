@@ -319,7 +319,7 @@ describe("Tool action enum", () => {
 		expect(actions).toContain("start");
 		expect(actions).toContain("status");
 		expect(actions).toContain("check");
-		expect(actions).toContain("stop"); // stop action is now valid for specific PR monitors
+		expect(actions).not.toContain("stop"); // LLM must not be able to stop monitoring
 	});
 
 	it("steering prompt describes monitoring behavior", () => {
@@ -327,7 +327,7 @@ describe("Tool action enum", () => {
 		const path = require("path");
 		const source = fs.readFileSync(path.join(__dirname, "../src/index.ts"), "utf-8");
 		
-		expect(source).toContain("Monitoring continues until the user stops it with /ghpr-monitor off");
+		expect(source).toContain("You must NOT stop monitoring on your own");
 	});
 });
 

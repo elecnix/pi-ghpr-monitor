@@ -76,14 +76,14 @@ describe("multi-PR monitoring architecture", () => {
 		expect(src).toContain("stopAllMonitors()");
 	});
 
-	it("tool supports stop action for LLM to stop a specific monitor", () => {
+	it("tool does NOT expose stop action to the LLM", () => {
 		const actionMatch = src.match(/action:\s*StringEnum\(\[([^\]]+)\]/);
 		expect(actionMatch).not.toBeNull();
 		const actions = actionMatch![1];
 		expect(actions).toContain("start");
 		expect(actions).toContain("status");
 		expect(actions).toContain("check");
-		expect(actions).toContain("stop");
+		expect(actions).not.toContain("stop"); // LLM must not be able to stop monitoring
 	});
 
 	it("command supports off with optional PR identifier", () => {

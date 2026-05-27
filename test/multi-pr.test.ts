@@ -3,7 +3,7 @@
  *
  * Tests the new Map<string, ActiveMonitor> architecture, PR key generation,
  * adding/removing multiple monitors, per-monitor state isolation, footer
- * aggregation, command parsing with multi-PR support, and the stop action.
+ * aggregation, command parsing with multi-PR support, and the stop action restriction.
  *
  * Uses structural/source-inspection patterns (like code-structure.test.ts)
  * since index.ts has Pi SDK dependencies that prevent direct import.
@@ -289,14 +289,14 @@ describe("Multi-PR architecture structure", () => {
 		expect(resolveFn).toContain("monitors.has");
 	});
 
-	it("tool supports start, status, check, and stop actions", () => {
+	it("tool supports start, status, and check actions (NOT stop)", () => {
 		const match = src.match(/action:\s*StringEnum\(\[([^\]]+)\]/);
 		expect(match).not.toBeNull();
 		const actions = match![1];
 		expect(actions).toContain('"start"');
 		expect(actions).toContain('"status"');
 		expect(actions).toContain('"check"');
-		expect(actions).toContain('"stop"');
+		expect(actions).not.toContain('"stop"'); // LLM must not be able to stop monitoring
 	});
 
 	it("tool status action reports count of all monitors", () => {
@@ -320,15 +320,13 @@ describe("Multi-PR architecture structure", () => {
 		expect(checkBlock).toContain("monitors.get(key)");
 	});
 
-	it("tool stop action stops a specific monitor", () => {
+	it("tool stop action is forbidden for the agent", () => {
 		const stopBlock = src.slice(
 			src.indexOf('case "stop"'),
 			src.indexOf('default:', src.indexOf('case "stop"')), 
 		);
-		expect(stopBlock).toContain("resolvePR()");
-		expect(stopBlock).toContain("prKey");
-		expect(stopBlock).toContain("stopMonitorByKey(key)");
-		expect(stopBlock).toContain("remainingMonitors: monitors.size");
+		expect(stopBlock).toContain("forbidden");
+		expect(stopBlock).not.toContain("stopMonitorByKey(key)"); // must not actually stop
 	});
 
 	it("start action returns already_running for duplicate monitor", () => {
