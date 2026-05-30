@@ -133,7 +133,7 @@ describe("forceNotify fix", () => {
 
 	it("forceNotify block sends actionable items or all-clear via enriched notification", () => {
 		const block = src.slice(
-			src.indexOf("if (mon.forceNotify && !agentTurnActive)"),
+			src.indexOf("if (mon.forceNotify) {"),
 			src.indexOf("Periodic nudge"),
 		);
 		expect(block).toContain("formatActionableItems(curr, config, currentPreferences)");
@@ -144,7 +144,7 @@ describe("forceNotify fix", () => {
 
 	it("forceNotify block cleared after use", () => {
 		const block = src.slice(
-			src.indexOf("if (mon.forceNotify && !agentTurnActive)"),
+			src.indexOf("if (mon.forceNotify) {"),
 			src.indexOf("Periodic nudge"),
 		);
 		expect(block).toContain("mon.forceNotify = false");

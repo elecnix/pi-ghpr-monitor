@@ -145,7 +145,7 @@ describe("All notification paths use sendPRNotification for agent delivery", () 
 	});
 
 	it("force-check notifications use sendPRNotification", () => {
-		const forceCheckIdx = src.indexOf("mon.forceNotify && !agentTurnActive");
+		const forceCheckIdx = src.indexOf("if (mon.forceNotify)");
 		expect(forceCheckIdx).toBeGreaterThan(-1);
 
 		const nearby = src.slice(forceCheckIdx, forceCheckIdx + 800);

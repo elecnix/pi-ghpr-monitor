@@ -277,8 +277,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	const monitors: Map<string, ActiveMonitor> = new Map();
 	let agentTurnActive = false;
 	let queuedUpdate: string | null = null;
-	let queuedForceCheck: string | null = null;
-	let queuedForceCheckDetailed: string | null = null;
+	let queuedForceChecks: Array<{ concise: string; detailed: string }> = [];
 	let lastSentUpdate: string | null = null;
 	let uiCtx: ExtensionUIContext | undefined;
 	const MAX_BACKOFF_SEC = 300; // 5 minutes max rate-limit backoff
@@ -392,13 +391,12 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				mon.lastSentReminder = null;
 			}
 		}
-		// Flush queued force-check result when turn ends
-		if (queuedForceCheck !== null) {
-			const concMsg = queuedForceCheck;
-			const detMsg = queuedForceCheckDetailed;
-			queuedForceCheck = null;
-			queuedForceCheckDetailed = null;
-			sendPRNotification(concMsg, detMsg ?? concMsg, {deliverAs: "steer"});
+		// Flush queued force-check results when turn ends
+		if (queuedForceChecks.length > 0) {
+			for (const fc of queuedForceChecks) {
+				sendPRNotification(fc.concise, fc.detailed, {deliverAs: "steer"});
+			}
+			queuedForceChecks = [];
 			for (const mon of monitors.values()) {
 				mon.lastNudgeTime = Date.now();
 			}
@@ -598,16 +596,16 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					mon.needsReminder = false;
 				}
 
-				// Force-check
-				if (mon.forceNotify && !agentTurnActive) {
+				// Force-check: always consume the flag so /ghpr-monitor check is never
+				// a no-op. When the agent is active, queue the result for flush on turn_end.
+				if (mon.forceNotify) {
 					const prUrl = `https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
 					const items = formatActionableItems(curr, config, currentPreferences);
 					const detItems = formatAgentNotification(curr, config, currentPreferences);
 					const msg = items ?? `\u2705 No issues found on ${prUrl}`;
 					const detMsg = detItems?.detailed ?? `\u2705 No issues found on ${prUrl}`;
 					if (agentTurnActive) {
-						queuedForceCheck = msg;
-						queuedForceCheckDetailed = detMsg;
+						queuedForceChecks.push({ concise: msg, detailed: detMsg });
 					} else {
 						sendPRNotification(msg, detMsg, {deliverAs: "steer"});
 					}
