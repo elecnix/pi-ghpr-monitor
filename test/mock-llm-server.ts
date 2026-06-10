@@ -5,6 +5,7 @@
  * 1. Receives messages from Pi
  * 2. Decides when to call ghpr-monitor tool
  * 3. Responds to PR status updates
+ * 4. Acknowledges tool call results
  *
  * Start with: npx tsx test/mock-llm-server.ts [port]
  * Default port: 9701
@@ -33,13 +34,36 @@ const DEFAULT_CONFIG: MockLLMConfig = {
 interface SeenMessage {
 	role: string;
 	content: string | null;
-	toolCalls?: unknown[];
+	tool_calls?: unknown[];
 }
 
 const seenMessages: SeenMessage[] = [];
 let monitorStarted = false;
 
 function buildResponse(messages: SeenMessage[]): object {
+	// Check if the last message is a tool result (the LLM is being given the
+	// result of a ghpr-monitor tool call). Acknowledge it naturally.
+	const lastMsg = messages[messages.length - 1];
+	if (lastMsg?.role === "tool") {
+		return {
+			id: `chatcmpl-${Date.now()}`,
+			object: "chat.completion",
+			created: Math.floor(Date.now() / 1000),
+			model: "mock-llm",
+			choices: [
+				{
+					index: 0,
+					message: {
+						role: "assistant",
+						content: "Monitoring started. I'll watch for updates.",
+					},
+					finish_reason: "stop",
+				},
+			],
+			usage: { prompt_tokens: 50, completion_tokens: 20, total_tokens: 70 },
+		};
+	}
+
 	const lastUserMsg = messages.filter((m) => m.role === "user").pop();
 	const lastUserContent = typeof lastUserMsg?.content === "string" ? lastUserMsg.content : "";
 
@@ -64,7 +88,7 @@ function buildResponse(messages: SeenMessage[]): object {
 		};
 	}
 
-	// If first prompt and autoStart, call the ghpr-monitor tool
+	// If the user asks to monitor a PR, call the ghpr-monitor tool
 	if (!monitorStarted && DEFAULT_CONFIG.autoStart && lastUserContent.toLowerCase().includes("monitor")) {
 		monitorStarted = true;
 		return {
@@ -167,7 +191,7 @@ export function createMockLLMServer(port: number = 9701): http.Server {
 							seenMessages.push({
 								role: msg.role,
 								content: msg.content,
-								toolCalls: msg.tool_calls,
+								tool_calls: msg.tool_calls,
 							});
 						}
 						const response = buildResponse(messages);

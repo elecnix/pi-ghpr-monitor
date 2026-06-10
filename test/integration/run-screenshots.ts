@@ -9,6 +9,9 @@
  *   queries to our mock server (instead of `gh api graphql`).
  * - The `GHPR_MONITOR_INTERVAL_SECS` env var reduces the polling interval
  *   from 60s to 5s so scenarios produce visible output in a reasonable time.
+ * - The mock LLM server provides deterministic responses, including tool call
+ *   responses for the ghpr-monitor tool. This allows testing the full agent
+ *   flow without PI_GHPR_NO_AGENT.
  * - We wait for Pi's TUI to render before sending `/ghpr-monitor` commands.
  * - We wait for the extension to actually produce output before capturing
  *   each screenshot.
@@ -22,6 +25,7 @@ import path from "node:path";
 import http from "node:http";
 
 const MOCK_GH_PORT = parseInt(process.env.MOCK_GH_PORT || "9700", 10);
+const MOCK_LLM_PORT = parseInt(process.env.MOCK_LLM_PORT || "9701", 10);
 const SCREENSHOT_DIR = process.argv[2] || path.join(__dirname, "screenshots");
 const PI_SESSION = "pi-ghpr-test";
 const PI_DIR = path.join(__dirname, ".pi-integration");
@@ -302,18 +306,13 @@ function setupPiConfig() {
 	// PI_CODING_AGENT_DIR points directly to the directory containing models.json/settings.json
 	fs.mkdirSync(PI_DIR, { recursive: true });
 
-	// models.json: custom "mock" provider.
-	// The LLM port is intentionally NOT listening — this prevents Pi's agent
-	// from making LLM calls that trigger the estimateContextTokens crash
-	// (Pi v0.75.5 bug: TypeError: message.content is not iterable).
-	// The /ghpr-monitor command is handled by Pi's command handler directly,
-	// so no LLM is needed for the extension to work.
+	// models.json: custom "mock" provider pointing at our mock LLM server.
 	fs.writeFileSync(path.join(PI_DIR, "models.json"), JSON.stringify({
 		providers: {
 			mock: {
 				api: "openai-completions",
 				apiKey: "mock-key",
-				baseUrl: "http://localhost:19999/v1",
+				baseUrl: `http://localhost:${MOCK_LLM_PORT}/v1`,
 				models: [{
 					id: "mock-llm",
 					name: "Mock LLM",
@@ -359,11 +358,11 @@ function buildScreenshotReport(files: string[]): string {
 	const lines: string[] = [
 		"# Tmux Screenshots",
 		"",
-		"Integration test with Pi 0.75.5 + PI_GHPR_NO_AGENT env var.",
-		"Pi was started with the ghpr-monitor extension and `GHPR_MOCK_BASE_URL`",
-		"pointing at a mock GitHub server. The mock LLM server is intentionally NOT",
-		"started to avoid a Pi v0.75.5 compaction bug. The `/ghpr-monitor` command",
-		"is handled by Pi's command handler directly (no LLM needed).",
+		"Integration test with Pi + mock LLM server. Pi was started with the",
+		"ghpr-monitor extension, GHPR_MOCK_BASE_URL pointing at a mock GitHub",
+		"server, and a mock LLM server providing deterministic responses.",
+		"The /ghpr-monitor command is handled by Pi's command handler and the",
+		"mock LLM responds to steer prompts with tool calls.",
 		"",
 	];
 
@@ -419,6 +418,11 @@ async function main() {
 	console.log("1. Starting mock GitHub server...");
 	const ghServer = await startMockGitHubServer();
 
+	console.log("2. Starting mock LLM server...");
+	const { createMockLLMServer } = await import("../mock-llm-server");
+	const llmServer = createMockLLMServer(MOCK_LLM_PORT);
+	await new Promise((r) => setTimeout(r, 300));
+
 	// Create tmux session
 	console.log("3. Creating tmux session...");
 	try { execSync(`tmux kill-session -t ${PI_SESSION} 2>/dev/null || true`); } catch {}
@@ -438,7 +442,7 @@ async function main() {
 	console.log("4. Starting Pi agent in tmux...");
 	tmuxSend(
 		PI_SESSION,
-		`cd ${projectDir} && PI_CODING_AGENT_DIR=${PI_DIR} PI_OFFLINE=1 GHPR_MOCK_BASE_URL=http://localhost:${MOCK_GH_PORT} GHPR_MONITOR_INTERVAL_SECS=${POLL_INTERVAL_SECS} PI_GHPR_NO_AGENT=1 npx pi --provider mock --model mock-llm --no-session --extension ./dist/index.js`,
+		`cd ${projectDir} && PI_CODING_AGENT_DIR=${PI_DIR} PI_OFFLINE=1 GHPR_MOCK_BASE_URL=http://localhost:${MOCK_GH_PORT} GHPR_MONITOR_INTERVAL_SECS=${POLL_INTERVAL_SECS} npx pi --provider mock --model mock-llm --no-session --extension ./dist/index.js`,
 	);
 
 	// SCENARIO 1: Wait for Pi to fully start up and show the extension loaded
@@ -551,6 +555,7 @@ async function main() {
 	console.log("\n🧹 Cleaning up...");
 	execSync(`tmux kill-session -t ${PI_SESSION} 2>/dev/null || true`);
 	ghServer.close();
+	llmServer.close();
 
 	console.log(`\n✅ Integration test complete! Screenshots saved to: ${SCREENSHOT_DIR}`);
 	const files = fs.readdirSync(SCREENSHOT_DIR).filter((f) => f.endsWith(".txt")).sort();

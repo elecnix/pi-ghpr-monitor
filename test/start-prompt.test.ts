@@ -55,15 +55,16 @@ describe("!/start subcommand injects steer prompt", () => {
 		expect(handlerBlock).not.toContain("startMonitor(");
 	});
 
-	it("falls back to ctx.ui.notify in NO_AGENT mode", () => {
+	it("always injects the steer prompt via pi.sendUserMessage", () => {
 		const handlerIdx = src.indexOf('raw === "!" || raw.toLowerCase() === "start"');
 		expect(handlerIdx).toBeGreaterThan(-1);
 
 		const nextSectionIdx = src.indexOf("// Parse: off", handlerIdx);
 		const handlerBlock = src.slice(handlerIdx, nextSectionIdx);
 
-		expect(handlerBlock).toContain("NO_AGENT");
-		expect(handlerBlock).toContain("ctx.ui.notify");
+		expect(handlerBlock).toContain("pi.sendUserMessage");
+		expect(handlerBlock).toContain("Monitor the current pull request");
+		expect(handlerBlock).toContain('deliverAs: "steer"');
 	});
 });
 
