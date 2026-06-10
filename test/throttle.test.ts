@@ -1653,7 +1653,7 @@ describe("Escape-loop bug: no rapid-fire reminders on repeated turn_end", () => 
 		const withCommentsAndThreads: PRStatus = {
 			...withThreads,
 			generalComments: 1,
-			commentDetails: [{ id: "c-1", author: "reviewer", body: "test" }],
+			commentDetails: [{ id: "c-1", databaseId: 1, author: "reviewer", body: "test" }],
 		};
 
 		// Initial discovery of threads
@@ -1801,8 +1801,8 @@ describe("First-poll overlap: no duplicate content from status update + reminder
 		failingChecks: ["ci/test"], pendingChecks: [],
 		lastCommentTimestamp: "", lastCommentBySelf: false,
 			lastCommitOid: "",
-		threadDetails: [{ id: "PRRT_1", isResolved: false, lastCommentAuthor: "reviewer", lastCommentBody: "fix this" }],
-		commentDetails: [{ id: "C_1", author: "reviewer", body: "general comment" }],
+		threadDetails: [{ id: "PRRT_1", databaseId: 1, isResolved: false, lastCommentAuthor: "reviewer", lastCommentBody: "fix this" }],
+		commentDetails: [{ id: "C_1", databaseId: 1, author: "reviewer", body: "general comment" }],
 		checkDetails: [{ name: "ci/test", conclusion: "FAILURE" }],
 	};
 

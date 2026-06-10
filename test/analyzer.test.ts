@@ -18,8 +18,9 @@ import {
 	formatFooterStatus,
 	snapshotPR,
 	linkifyPRRefs,
+	formatAgentNotification,
 } from "../src/analyzer";
-import type { PullRequestData, PRStatus, MonitorConfig, CommitNode, ReactionNode } from "../src/analyzer";
+import type { PullRequestData, PRStatus, MonitorConfig, CommitNode, ReactionNode, ThreadSummary, CommentSummary } from "../src/analyzer";
 
 function makeMockPR(overrides: Partial<PullRequestData> = {}): PullRequestData {
 	const defaults: PullRequestData = {
@@ -46,9 +47,9 @@ describe("countUnresolvedThreads", () => {
 		const pr = makeMockPR({
 			reviewThreads: {
 				nodes: [
-					{ id: "1", isResolved: false, comments: { nodes: [] } },
-					{ id: "2", isResolved: true, comments: { nodes: [] } },
-					{ id: "3", isResolved: false, comments: { nodes: [] } },
+					{ id: "1", databaseId: 101, isResolved: false, comments: { nodes: [] } },
+					{ id: "2", databaseId: 102, isResolved: true, comments: { nodes: [] } },
+					{ id: "3", databaseId: 103, isResolved: false, comments: { nodes: [] } },
 				],
 			},
 		});
@@ -662,8 +663,8 @@ describe("formatStatusUpdate with detail", () => {
 			lastCommentBySelf: false,
 			lastCommitOid: "",
 			threadDetails: [
-				{ id: "PRRT_1", isResolved: false, lastCommentAuthor: "reviewer", lastCommentBody: "Please fix this typo" },
-				{ id: "PRRT_2", isResolved: false, lastCommentAuthor: "bot", lastCommentBody: "Build failed" },
+				{ id: "PRRT_1", databaseId: 201, isResolved: false, lastCommentAuthor: "reviewer", lastCommentBody: "Please fix this typo" },
+				{ id: "PRRT_2", databaseId: 202, isResolved: false, lastCommentAuthor: "bot", lastCommentBody: "Build failed" },
 			],
 			commentDetails: [],
 			checkDetails: [],
@@ -687,7 +688,7 @@ describe("formatStatusUpdate with detail", () => {
 			lastCommitOid: "",
 			threadDetails: [],
 			commentDetails: [
-				{ id: "C_1", author: "teammate", body: "Can you add tests?" },
+				{ id: "C_1", databaseId: 301, author: "teammate", body: "Can you add tests?" },
 			],
 			checkDetails: [],
 		};
@@ -731,7 +732,7 @@ describe("formatStatusUpdate with detail", () => {
 			lastCommitOid: "",
 			threadDetails: [],
 			commentDetails: [
-				{ id: "C_1", author: "user", body: longBody },
+				{ id: "C_1", databaseId: 302, author: "user", body: longBody },
 			],
 			checkDetails: [],
 		};
@@ -753,7 +754,7 @@ describe("formatStatusUpdate with detail", () => {
 			lastCommitOid: "",
 			threadDetails: [],
 			commentDetails: [
-				{ id: "C_1", author: "v2nic", body: multilineBody },
+				{ id: "C_1", databaseId: 303, author: "v2nic", body: multilineBody },
 			],
 			checkDetails: [],
 		};
@@ -779,8 +780,8 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 		const pr: PullRequestData = {
 			comments: {
 				nodes: [
-					{ id: "c-1", body: "Please fix this", author: { login: "reviewer" }, createdAt: "2024-01-01T00:00:00Z", reactions: { nodes: [] } },
-					{ id: "c-2", body: "Quality Gate Passed", author: { login: "sonarqubecloud" }, createdAt: "2024-01-01T00:01:00Z", reactions: { nodes: [{ content: "THUMBS_UP" }] } },
+					{ id: "c-1", databaseId: 401, body: "Please fix this", author: { login: "reviewer" }, createdAt: "2024-01-01T00:00:00Z", reactions: { nodes: [] } },
+					{ id: "c-2", databaseId: 402, body: "Quality Gate Passed", author: { login: "sonarqubecloud" }, createdAt: "2024-01-01T00:01:00Z", reactions: { nodes: [{ content: "THUMBS_UP" }] } },
 				],
 			},
 			reviewThreads: { nodes: [] },
@@ -804,19 +805,21 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 				nodes: [
 					{
 						id: "t-1",
+						databaseId: 501,
 						isResolved: false,
 						comments: {
 							nodes: [
-								{ id: "tc-1", body: "Fix this", author: { login: "reviewer" }, createdAt: "2024-01-01T00:00:00Z", reactions: { nodes: [] } },
+								{ id: "tc-1", databaseId: 601, body: "Fix this", author: { login: "reviewer" }, createdAt: "2024-01-01T00:00:00Z", reactions: { nodes: [] } },
 							],
 						},
 					},
 					{
 						id: "t-2",
+						databaseId: 502,
 						isResolved: false,
 						comments: {
 							nodes: [
-								{ id: "tc-2", body: "Looks good now", author: { login: "dev" }, createdAt: "2024-01-01T00:01:00Z", reactions: { nodes: [{ content: "THUMBS_UP" }] } },
+								{ id: "tc-2", databaseId: 602, body: "Looks good now", author: { login: "dev" }, createdAt: "2024-01-01T00:01:00Z", reactions: { nodes: [{ content: "THUMBS_UP" }] } },
 							],
 						},
 					},
@@ -839,7 +842,7 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 		const pr: PullRequestData = {
 			comments: {
 				nodes: [
-					{ id: "c-1", body: "Please fix", author: { login: "reviewer" }, createdAt: "2024-01-01T00:00:00Z", reactions: { nodes: [] } },
+					{ id: "c-1", databaseId: 701, body: "Please fix", author: { login: "reviewer" }, createdAt: "2024-01-01T00:00:00Z", reactions: { nodes: [] } },
 				],
 			},
 			reviewThreads: { nodes: [] },
@@ -858,8 +861,8 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 		const pr: PullRequestData = {
 			comments: {
 				nodes: [
-					{ id: "c-1", body: "Nice!", author: { login: "reviewer" }, createdAt: "2024-01-01T00:00:00Z", reactions: { nodes: [{ content: "HEART" }] } },
-					{ id: "c-2", body: "Done", author: { login: "dev" }, createdAt: "2024-01-01T00:01:00Z", reactions: { nodes: [{ content: "THUMBS_UP" }] } },
+					{ id: "c-1", databaseId: 801, body: "Nice!", author: { login: "reviewer" }, createdAt: "2024-01-01T00:00:00Z", reactions: { nodes: [{ content: "HEART" }] } },
+					{ id: "c-2", databaseId: 802, body: "Done", author: { login: "dev" }, createdAt: "2024-01-01T00:01:00Z", reactions: { nodes: [{ content: "THUMBS_UP" }] } },
 				],
 			},
 			reviewThreads: { nodes: [] },
@@ -1199,5 +1202,212 @@ describe("snapshotPR extracts lastCommitOid", () => {
 		const status = snapshotPR(pr);
 		expect(status.lastCommitOid).toBe("sha-98765");
 		expect(status.failingChecks).toContain("ci/test");
+	});
+});
+
+describe("snapshotPR maps databaseId from GraphQL", () => {
+	it("maps thread databaseId to ThreadSummary.databaseId", () => {
+		const pr = makeMockPR({
+			reviewThreads: {
+				nodes: [
+					{
+						id: "PRRT_abc123",
+						databaseId: 98765,
+						isResolved: false,
+						comments: {
+							nodes: [
+								{
+									id: "RC_xyz789",
+									databaseId: 12345,
+									body: "A review comment",
+									author: { login: "reviewer" },
+									createdAt: "2024-01-01T00:00:00Z",
+									reactions: { nodes: [] },
+									path: "src/main.ts",
+									line: 42,
+								},
+							],
+						},
+					},
+				],
+			},
+		});
+		const status = snapshotPR(pr);
+		expect(status.threadDetails[0].databaseId).toBe(98765);
+	});
+
+	it("maps comment databaseId to CommentSummary.databaseId for review comments", () => {
+		const pr = makeMockPR({
+			reviewThreads: {
+				nodes: [
+					{
+						id: "PRRT_abc",
+						databaseId: 99,
+						isResolved: false,
+						comments: {
+							nodes: [
+								{
+									id: "RC_xyz",
+									databaseId: 12345,
+									body: "A review comment",
+									author: { login: "reviewer" },
+									createdAt: "2024-01-01T00:00:00Z",
+									reactions: { nodes: [] },
+									path: "src/main.ts",
+									line: 42,
+								},
+							],
+						},
+					},
+				],
+			},
+		});
+		const status = snapshotPR(pr);
+		expect(status.threadDetails[0].allComments![0].databaseId).toBe(12345);
+	});
+
+	it("maps comment databaseId to CommentSummary.databaseId for general comments", () => {
+		const pr = makeMockPR({
+			comments: {
+				nodes: [
+					{
+						id: "IC_general",
+						databaseId: 54321,
+						body: "A general comment",
+						author: { login: "commenter" },
+						createdAt: "2024-01-01T00:00:00Z",
+						reactions: { nodes: [] },
+					},
+				],
+			},
+		});
+		const status = snapshotPR(pr);
+		expect(status.commentDetails[0].databaseId).toBe(54321);
+	});
+});
+
+describe("formatThreadDetailBlock includes databaseId", () => {
+	it("includes thread databaseId in header", () => {
+		const thread: ThreadSummary = {
+			id: "PRRT_abc",
+			databaseId: 98765,
+			isResolved: false,
+			lastCommentAuthor: "reviewer",
+			lastCommentBody: "Fix this",
+			fullBody: "Fix this bug",
+			path: "src/main.ts",
+			line: 42,
+			allComments: [
+				{ id: "RC_1", databaseId: 11111, author: "reviewer", body: "Fix this", fullBody: "Fix this bug", path: "src/main.ts", line: 42 },
+			],
+		};
+		const result = formatAgentNotification({
+			unresolvedThreads: 1,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+			lastCommitOid: "",
+			threadDetails: [thread],
+			commentDetails: [],
+			checkDetails: [],
+		}, {
+			owner: "owner",
+			repo: "repo",
+			number: 42,
+			host: "github.com",
+			mode: "all",
+			intervalSec: 60,
+			debounceSec: 30,
+		});
+		expect(result).not.toBeNull();
+		expect(result!.detailed).toContain("Thread PRRT_abc (databaseId: 98765) (src/main.ts:42)");
+		expect(result!.detailed).toContain("(id: RC_1, databaseId: 11111)");
+	});
+});
+
+describe("formatCommentDetailBlock includes databaseId", () => {
+	it("includes databaseId for general comments", () => {
+		const result = formatAgentNotification({
+			unresolvedThreads: 0,
+			generalComments: 1,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+			lastCommitOid: "",
+			threadDetails: [],
+			commentDetails: [
+				{ id: "IC_1", databaseId: 54321, author: "bot", body: "Deploy done", fullBody: "Deploy notification" },
+			],
+			checkDetails: [],
+		}, {
+			owner: "owner",
+			repo: "repo",
+			number: 42,
+			host: "github.com",
+			mode: "all",
+			intervalSec: 60,
+			debounceSec: 30,
+		});
+		expect(result).not.toBeNull();
+		expect(result!.detailed).toContain("Comment IC_1 by bot (databaseId: 54321)");
+	});
+});
+
+describe("formatThreadDetails concise includes databaseId", () => {
+	const config: MonitorConfig = {
+		owner: "owner",
+		repo: "repo",
+		number: 42,
+		host: "github.com",
+		mode: "all",
+		intervalSec: 60,
+		debounceSec: 30,
+	};
+
+	it("includes thread databaseId in concise one-liner", () => {
+		const status: PRStatus = {
+			unresolvedThreads: 1,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+			lastCommitOid: "",
+			threadDetails: [
+				{ id: "PRRT_abc", databaseId: 98765, isResolved: false, lastCommentAuthor: "reviewer", lastCommentBody: "Fix this" },
+			],
+			commentDetails: [],
+			checkDetails: [],
+		};
+		const result = formatStatusUpdate(null, status, config);
+		expect(result).toContain("databaseId: 98765");
+		expect(result).toContain("PRRT_abc");
+	});
+
+	it("includes comment databaseId in concise one-liner", () => {
+		const status: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 1,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+			lastCommitOid: "",
+			threadDetails: [],
+			commentDetails: [
+				{ id: "IC_1", databaseId: 54321, author: "bot", body: "Deploy done" },
+			],
+			checkDetails: [],
+		};
+		const result = formatStatusUpdate(null, status, config);
+		expect(result).toContain("databaseId: 54321");
+		expect(result).toContain("IC_1");
 	});
 });

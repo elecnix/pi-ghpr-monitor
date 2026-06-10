@@ -67,14 +67,15 @@ const AWAIT_QUERY = `query AwaitPR(
       state
       merged
       comments(last: $lastComments) {
-        nodes { id body author { login } createdAt reactions(content: THUMBS_UP, first: 1) { nodes { content } } }
+        nodes { id databaseId body author { login } createdAt reactions(content: THUMBS_UP, first: 1) { nodes { content } } }
       }
       reviewThreads(last: $lastThreads) {
         nodes {
           id
+          databaseId
           isResolved
           comments(last: $lastThreadComments) {
-            nodes { id body author { login } createdAt path line reactions(content: THUMBS_UP, first: 1) { nodes { content } } }
+            nodes { id databaseId body author { login } createdAt path line reactions(content: THUMBS_UP, first: 1) { nodes { content } } }
           }
         }
       }
