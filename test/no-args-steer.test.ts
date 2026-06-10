@@ -3,8 +3,7 @@
  *
  * When /ghpr-monitor is invoked without arguments (or with just "on"):
  * - If monitors are running, shows current status via ctx.ui.notify
- * - If no monitors are running, sends a steer message to the agent
- *   (this PR only adds the status subcommand; removing the steer is #41)
+ * - If no monitors are running, shows a usage hint via ctx.ui.notify (no steer, no agent turn)
  *
  * The /ghpr-monitor status subcommand displays PR status to both the TUI
  * and the LLM context without triggering an agent turn, using pi.sendMessage
@@ -20,37 +19,72 @@ const src = fs.readFileSync(
 	"utf-8",
 );
 
-describe("no-args behavior", () => {
+describe("no-args behavior without steer message", () => {
+	it("shows usage via ctx.ui.notify when no args and no monitor running", () => {
+		// Find the block that handles "on" or empty args
+		const onBlockStart = src.indexOf('if (raw.toLowerCase() === "on" || raw === "")');
+		expect(onBlockStart).toBeGreaterThan(-1);
+
+		// The "no monitors running" branch should use ctx.ui.notify, NOT pi.sendUserMessage
+		const onBlock = src.slice(onBlockStart, onBlockStart + 800);
+
+		// Must NOT send a steering message
+		expect(onBlock).not.toContain("pi.sendUserMessage");
+
+		// Must use ctx.ui.notify for UI-only display
+		expect(onBlock).toContain("ctx.ui.notify");
+	});
+
+	it("does not send a steering message mentioning action='start'", () => {
+		// The old steer message text should not be present
+		const steerIdx = src.indexOf("The user wants to start PR monitoring");
+		expect(steerIdx).toBe(-1);
+	});
+
 	it("shows status when monitors are already running and no args given", () => {
 		const onBlockStart = src.indexOf('if (raw.toLowerCase() === "on" || raw === "")');
 		expect(onBlockStart).toBeGreaterThan(-1);
 
-		const runningBranch = src.slice(
-			src.indexOf("if (monitors.size > 0)", onBlockStart),
-			src.indexOf("pi.sendUserMessage", onBlockStart),
-		);
+		const monitorsCheckStart = src.indexOf("if (monitors.size > 0)", onBlockStart);
+		expect(monitorsCheckStart).toBeGreaterThan(-1);
+
+		const noMonitorsCommentIdx = src.indexOf("// No monitors running", onBlockStart);
+		expect(noMonitorsCommentIdx).toBeGreaterThan(-1);
+
+		// The "already monitoring" branch must show current status
+		const runningBranch = src.slice(monitorsCheckStart, noMonitorsCommentIdx);
 		expect(runningBranch).toContain("formatCurrentStatus()");
 		expect(runningBranch).toContain("ctx.ui.notify(statusText");
 	});
 
-	it("sends steer message when no monitors running (to be replaced by #41)", () => {
-		// This PR (#40) does not change the no-monitors steer behavior;
-		// that's covered by #41. Verify the steer message still exists.
+	it("shows a usage hint when no monitor is running (not an error)", () => {
 		const onBlockStart = src.indexOf('if (raw.toLowerCase() === "on" || raw === "")');
 		expect(onBlockStart).toBeGreaterThan(-1);
-		const onBlock = src.slice(onBlockStart, onBlockStart + 1200);
-		expect(onBlock).toContain("pi.sendUserMessage");
+
+		// Find the no-monitors branch specifically — scoped between the comment marker
+		// and the next "return" statement
+		const noMonitorsCommentIdx = src.indexOf("// No monitors running", onBlockStart);
+		expect(noMonitorsCommentIdx).toBeGreaterThan(-1);
+
+		const returnAfterNoMonitors = src.indexOf("return;", noMonitorsCommentIdx);
+		expect(returnAfterNoMonitors).toBeGreaterThan(-1);
+
+		const noMonitorsBranch = src.slice(noMonitorsCommentIdx, returnAfterNoMonitors);
+		expect(noMonitorsBranch).toContain("No PR monitors running");
+		expect(noMonitorsBranch).toContain("ctx.ui.notify");
+		// Should NOT be an error or warning — just info
+		expect(noMonitorsBranch).toContain('"info"');
 	});
 
-	it("command description mentions status subcommand", () => {
+	it("command description mentions status/usage capability", () => {
 		const descMatch = src.match(/description:\s*"Monitor[^"]*"/);
 		expect(descMatch).not.toBeNull();
-		expect(descMatch![0]).toContain("/ghpr-monitor status");
+		expect(descMatch![0]).toContain("status/usage");
 	});
 
 	it("header comment documents no-args and status behavior", () => {
 		const headerComment = src.slice(0, src.indexOf("// -----------") > 0 ? src.indexOf("// -----------") : 2000);
-		expect(headerComment).toContain("status");
+		expect(headerComment).toContain("no args = show status/usage");
 	});
 });
 
