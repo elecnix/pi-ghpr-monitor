@@ -31,6 +31,7 @@ describe("formatStatusUpdate throttling behavior", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const curr = { ...prev };
 		// When prev and curr are both clean, nothing changed — should return empty string
@@ -47,6 +48,7 @@ describe("formatStatusUpdate throttling behavior", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "2024-01-01T00:00:00Z",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const curr: PRStatus = {
 			...prev,
@@ -66,6 +68,7 @@ describe("formatStatusUpdate throttling behavior", () => {
 			pendingChecks: ["ci/a", "ci/b"],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const curr: PRStatus = {
 			...prev,
@@ -85,6 +88,7 @@ describe("formatStatusUpdate throttling behavior", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const curr: PRStatus = {
 			...prev,
@@ -105,6 +109,7 @@ describe("formatStatusUpdate throttling behavior", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const curr: PRStatus = {
 			...prev,
@@ -123,6 +128,7 @@ describe("formatStatusUpdate throttling behavior", () => {
 			pendingChecks: ["ci/lint"],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const curr: PRStatus = {
 			...prev,
@@ -292,6 +298,7 @@ describe("Update throttling state machine", () => {
 			pendingChecks: ["ci/lint"],
 			lastCommentTimestamp: "2024-01-01T00:00:00Z",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		// After stopMonitorByKey, the entry is removed from the map
 		// This means next poll will report issues as if first time
@@ -345,6 +352,7 @@ describe("Reminder after idle", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 
 		// turn_start
@@ -395,6 +403,7 @@ describe("Reminder after idle", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const config: MonitorConfig = {
 			owner: "owner",
@@ -417,6 +426,7 @@ describe("Reminder after idle", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const config: MonitorConfig = {
 			owner: "owner",
@@ -666,6 +676,7 @@ describe("No spam for unchanged failing checks", () => {
 		pendingChecks: [],
 		lastCommentTimestamp: "",
 		lastCommentBySelf: false,
+			lastCommitOid: "",
 		threadDetails: [],
 		commentDetails: [],
 		checkDetails: [
@@ -845,6 +856,7 @@ describe("Notification state machine: no spam with active agent", () => {
 		pendingChecks: [],
 		lastCommentTimestamp: "",
 		lastCommentBySelf: false,
+			lastCommitOid: "",
 		threadDetails: [],
 		commentDetails: [],
 		checkDetails: [
@@ -976,6 +988,7 @@ describe("Periodic nudge for idle agent", () => {
 		pendingChecks: [],
 		lastCommentTimestamp: "",
 		lastCommentBySelf: false,
+			lastCommitOid: "",
 		threadDetails: [],
 		commentDetails: [],
 		checkDetails: [
@@ -1169,6 +1182,7 @@ describe("Force check sends current state even when nothing changed", () => {
 		unresolvedThreads: 2, generalComments: 1, hasConflicts: false,
 		failingChecks: [], pendingChecks: [],
 		lastCommentTimestamp: "", lastCommentBySelf: false,
+			lastCommitOid: "",
 		threadDetails: [], commentDetails: [], checkDetails: [],
 	};
 
@@ -1270,6 +1284,7 @@ describe("Force check sends current state even when nothing changed", () => {
 			unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
 			failingChecks: [], pendingChecks: [],
 			lastCommentTimestamp: "", lastCommentBySelf: false,
+			lastCommitOid: "",
 			threadDetails: [], commentDetails: [], checkDetails: [],
 		};
 		const sim = createCheckSim();
@@ -1357,6 +1372,7 @@ describe("Force check sends current state even when nothing changed", () => {
 			unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
 			failingChecks: [], pendingChecks: [],
 			lastCommentTimestamp: "", lastCommentBySelf: false,
+			lastCommitOid: "",
 			threadDetails: [], commentDetails: [], checkDetails: [],
 		};
 
@@ -1399,6 +1415,7 @@ describe("Escape-loop bug: no rapid-fire reminders on repeated turn_end", () => 
 		unresolvedThreads: 2, generalComments: 0, hasConflicts: false,
 		failingChecks: [], pendingChecks: [],
 		lastCommentTimestamp: "", lastCommentBySelf: false,
+			lastCommitOid: "",
 		threadDetails: [], commentDetails: [], checkDetails: [],
 	};
 
@@ -1672,6 +1689,7 @@ describe("Reminder fires after agent processes identical actionable items", () =
 		unresolvedThreads: 2, generalComments: 0, hasConflicts: false,
 		failingChecks: [], pendingChecks: [],
 		lastCommentTimestamp: "", lastCommentBySelf: false,
+			lastCommitOid: "",
 		threadDetails: [], commentDetails: [], checkDetails: [],
 	};
 
@@ -1782,6 +1800,7 @@ describe("First-poll overlap: no duplicate content from status update + reminder
 		unresolvedThreads: 1, generalComments: 1, hasConflicts: true,
 		failingChecks: ["ci/test"], pendingChecks: [],
 		lastCommentTimestamp: "", lastCommentBySelf: false,
+			lastCommitOid: "",
 		threadDetails: [{ id: "PRRT_1", isResolved: false, lastCommentAuthor: "reviewer", lastCommentBody: "fix this" }],
 		commentDetails: [{ id: "C_1", author: "reviewer", body: "general comment" }],
 		checkDetails: [{ name: "ci/test", conclusion: "FAILURE" }],
@@ -1791,6 +1810,7 @@ describe("First-poll overlap: no duplicate content from status update + reminder
 		unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
 		failingChecks: [], pendingChecks: [],
 		lastCommentTimestamp: "", lastCommentBySelf: false,
+			lastCommitOid: "",
 		threadDetails: [], commentDetails: [], checkDetails: [],
 	};
 

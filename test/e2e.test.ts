@@ -97,7 +97,7 @@ function buildResponse() {
 					mergeStateStatus: state.hasConflicts ? "DIRTY" : "CLEAN",
 					state: (state as any).state || "OPEN",
 					merged: (state as any).merged || false,
-		commits: { nodes: [{ commit: { checkSuites: { nodes: checkSuiteNodes }, status: { state: "SUCCESS", contexts: [] } } }] },
+					commits: { nodes: [{ commit: { oid: "abc123", checkSuites: { nodes: checkSuiteNodes }, status: { state: "SUCCESS", contexts: [] } } }] },
 				},
 			},
 		},

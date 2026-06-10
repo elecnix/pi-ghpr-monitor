@@ -57,6 +57,7 @@ function makeMockStatus(overrides: Partial<PRStatus> = {}): PRStatus {
 		pendingChecks: [],
 		lastCommentTimestamp: "",
 		lastCommentBySelf: false,
+		lastCommitOid: "",
 		threadDetails: [],
 		commentDetails: [],
 		checkDetails: [],

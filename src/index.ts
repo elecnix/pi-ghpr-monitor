@@ -39,6 +39,7 @@ import {
 	getPreferencesPath,
 	getEffectivePreferences,
 	interpolateTemplate,
+	getPreferenceWithDefault,
 } from "./preferences";
 import { setSessionId, enableDebug, disableDebug, isDebugEnabled, closeLogger, log, logPRSnapshot, logStatus, getLogPath } from "./logger";
 
@@ -77,6 +78,7 @@ const AWAIT_QUERY = `query AwaitPR(
       commits(last: 1) {
         nodes {
           commit {
+            oid
             checkSuites(last: $lastCheckSuites) {
               nodes {
                 id
@@ -253,6 +255,7 @@ export interface ActiveMonitor {
 	consecutiveNoChange: number;
 	lastNudgeTime: number; // epoch ms
 	pollWakeResolve: (() => void) | null;
+	knownCommitOid: string | null;
 }
 
 function createActiveMonitor(config: MonitorConfig): ActiveMonitor {
@@ -269,6 +272,7 @@ function createActiveMonitor(config: MonitorConfig): ActiveMonitor {
 		consecutiveNoChange: 0,
 		lastNudgeTime: 0,
 		pollWakeResolve: null,
+		knownCommitOid: null,
 	};
 }
 
@@ -646,6 +650,31 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 						sendPRNotification(nudge, detNudge?.detailed ?? nudge, {deliverAs: "steer", host: config.host});
 						mon.lastSentReminder = nudge;
 						mon.lastNudgeTime = Date.now();
+					}
+				}
+
+				// Description staleness nudge: detect new commits and remind agent to review the PR description
+				if (curr.lastCommitOid) {
+					if (mon.knownCommitOid === null) {
+						// First poll: learn the current commit without nudging
+						mon.knownCommitOid = curr.lastCommitOid;
+					} else if (curr.lastCommitOid !== mon.knownCommitOid) {
+						// New commit detected: nudge the agent to review the PR description
+						const prLabel = `${config.owner}/${config.repo}#${config.number}`;
+						const defaultStalenessMsg = `\u{1F4DD} New commit pushed to ${prLabel}. Review the PR description to ensure it still accurately reflects the latest changes.`;
+						const stalenessMsg = getPreferenceWithDefault(
+							"descriptionStaleness",
+							currentPreferences,
+							{ owner: config.owner, repo: config.repo, number: config.number, host: config.host, prLabel },
+							defaultStalenessMsg,
+						);
+						if (agentTurnActive) {
+							// Queue for flush on turn_end, matching the pattern used by status updates and force-checks
+							queuedForceChecks.push({ concise: stalenessMsg, detailed: stalenessMsg, host: config.host });
+						} else {
+							sendPRNotification(stalenessMsg, stalenessMsg, {deliverAs: "steer", host: config.host});
+						}
+						mon.knownCommitOid = curr.lastCommitOid;
 					}
 				}
 

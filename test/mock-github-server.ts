@@ -130,6 +130,7 @@ function buildGraphQLResponse(state: MockPRState): object {
 						nodes: [
 							{
 								commit: {
+									oid: "abc123def456789",
 									checkSuites: {
 										nodes: checkSuiteNodes,
 									},

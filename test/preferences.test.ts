@@ -477,6 +477,7 @@ describe("preferences in notification formatting", () => {
 		pendingChecks: [] as string[],
 		lastCommentTimestamp: "",
 		lastCommentBySelf: false,
+		lastCommitOid: "",
 		threadDetails: [] as unknown[],
 		commentDetails: [] as unknown[],
 		checkDetails: [] as unknown[],
@@ -628,5 +629,26 @@ describe("preferences in notification formatting", () => {
 
 		const result = formatStatusUpdate(null, curr, config);
 		expect(result).toContain("Merge conflicts detected on v2nic/pi-ghpr-monitor#32");
+	});
+
+	it("descriptionStaleness preference is accepted by validatePreferences", () => {
+		const result = validatePreferences(JSON.stringify({ descriptionStaleness: "\u{1F4DD} New push to {prLabel} — check the description!" }));
+		expect(result.ok).toBe(true);
+		expect(result.preferences?.descriptionStaleness).toBe("\u{1F4DD} New push to {prLabel} — check the description!");
+	});
+
+	it("descriptionStaleness preference supports {owner}, {repo}, {number}, {host}, {prLabel} variables", () => {
+		const result = interpolateTemplate("New push to {prLabel} ({owner}/{repo}#{number}) on {host}", {
+			owner: "v2nic",
+			repo: "pi-ghpr-monitor",
+			number: 37,
+			host: "github.com",
+			prLabel: "v2nic/pi-ghpr-monitor#37",
+		});
+		expect(result).toBe("New push to v2nic/pi-ghpr-monitor#37 (v2nic/pi-ghpr-monitor#37) on github.com");
+	});
+
+	it("descriptionStaleness preference is included in PreferencesSchema keys", () => {
+		expect(Object.keys(PreferencesSchema.properties)).toContain("descriptionStaleness");
 	});
 });

@@ -71,6 +71,12 @@ export const PreferencesSchema = Type.Object(
 					"Prompt override for the initial status on first poll. Variables: {owner}, {repo}, {number}, {host}, {prLabel}, {intervalSec}",
 			}),
 		),
+		descriptionStaleness: Type.Optional(
+			Type.String({
+				description:
+					"Prompt override for description staleness nudge when new commits are detected. Variables: {owner}, {repo}, {number}, {host}, {prLabel}",
+			}),
+		),
 	},
 	{
 		additionalProperties: false,

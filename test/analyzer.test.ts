@@ -80,6 +80,7 @@ describe("failingChecks", () => {
 				nodes: [
 					{
 						commit: {
+							oid: "test-oid",
 							checkSuites: {
 								nodes: [
 									{
@@ -120,6 +121,7 @@ describe("pendingChecks", () => {
 				nodes: [
 					{
 						commit: {
+							oid: "test-oid",
 							checkSuites: {
 								nodes: [
 									{
@@ -152,6 +154,7 @@ describe("failingStatuses", () => {
 				nodes: [
 					{
 						commit: {
+							oid: "test-oid",
 							checkSuites: { nodes: [] },
 							status: {
 								state: "FAILURE",
@@ -175,6 +178,7 @@ describe("failingStatuses", () => {
 				nodes: [
 					{
 						commit: {
+							oid: "test-oid",
 							checkSuites: { nodes: [] },
 							status: {
 								state: "FAILURE",
@@ -196,6 +200,7 @@ describe("failingStatuses", () => {
 				nodes: [
 					{
 						commit: {
+							oid: "test-oid",
 							checkSuites: { nodes: [] },
 							status: null,
 						},
@@ -219,6 +224,7 @@ describe("pendingStatuses", () => {
 				nodes: [
 					{
 						commit: {
+							oid: "test-oid",
 							checkSuites: { nodes: [] },
 							status: {
 								state: "PENDING",
@@ -240,6 +246,7 @@ describe("pendingStatuses", () => {
 				nodes: [
 					{
 						commit: {
+							oid: "test-oid",
 							checkSuites: { nodes: [] },
 							status: {
 								state: "EXPECTED",
@@ -263,6 +270,7 @@ describe("failingChecks includes commit statuses", () => {
 				nodes: [
 					{
 						commit: {
+							oid: "test-oid",
 							checkSuites: {
 								nodes: [
 									{
@@ -297,6 +305,7 @@ describe("failingChecks includes commit statuses", () => {
 				nodes: [
 					{
 						commit: {
+							oid: "test-oid",
 							checkSuites: { nodes: [] },
 							status: {
 								state: "FAILURE",
@@ -321,6 +330,7 @@ describe("pendingChecks includes commit statuses", () => {
 				nodes: [
 					{
 						commit: {
+							oid: "test-oid",
 							checkSuites: {
 								nodes: [
 									{
@@ -368,6 +378,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		expect(update).toContain("all clear");
@@ -382,6 +393,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		expect(update).toContain("conflict");
@@ -396,6 +408,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		expect(update).toContain("Failing");
@@ -411,6 +424,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const curr: PRStatus = {
 			...prev,
@@ -429,6 +443,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: ["ci/build"],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const curr: PRStatus = {
 			unresolvedThreads: 0,
@@ -438,6 +453,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const update = formatStatusUpdate(prev, curr, config);
 		expect(update).toContain("passed");
@@ -452,6 +468,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		expect(update).toContain("all clear");
@@ -466,6 +483,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		// When prev is null, format uses "N new" format since prev count defaults to 0
@@ -481,6 +499,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: ["ci/test", "ci/lint"],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		expect(update).not.toContain("pending");
@@ -506,6 +525,7 @@ describe("formatActionableItems", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		expect(formatActionableItems(status, config)).toBeNull();
 	});
@@ -519,6 +539,7 @@ describe("formatActionableItems", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const result = formatActionableItems(status, config);
 		expect(result).toContain("Merge conflicts detected");
@@ -533,6 +554,7 @@ describe("formatActionableItems", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const result = formatActionableItems(status, config);
 		expect(result).toContain("Failing CI checks");
@@ -549,6 +571,7 @@ describe("formatActionableItems", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const result = formatActionableItems(status, config);
 		expect(result).toContain("3 unresolved review thread(s)");
@@ -563,6 +586,7 @@ describe("formatActionableItems", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const result = formatActionableItems(status, config);
 		expect(result).toContain("2 general comment(s)");
@@ -577,6 +601,7 @@ describe("formatActionableItems", () => {
 			pendingChecks: ["ci/build"],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		expect(formatActionableItems(status, config)).toBeNull();
 	});
@@ -590,6 +615,7 @@ describe("formatActionableItems", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		expect(formatActionableItems(status, config)).toBeNull();
 	});
@@ -603,6 +629,7 @@ describe("formatActionableItems", () => {
 			pendingChecks: ["ci/build"],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 		};
 		const result = formatActionableItems(status, config);
 		expect(result).toContain("Merge conflicts detected");
@@ -633,6 +660,7 @@ describe("formatStatusUpdate with detail", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 			threadDetails: [
 				{ id: "PRRT_1", isResolved: false, lastCommentAuthor: "reviewer", lastCommentBody: "Please fix this typo" },
 				{ id: "PRRT_2", isResolved: false, lastCommentAuthor: "bot", lastCommentBody: "Build failed" },
@@ -656,6 +684,7 @@ describe("formatStatusUpdate with detail", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 			threadDetails: [],
 			commentDetails: [
 				{ id: "C_1", author: "teammate", body: "Can you add tests?" },
@@ -677,6 +706,7 @@ describe("formatStatusUpdate with detail", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 			threadDetails: [],
 			commentDetails: [],
 			checkDetails: [
@@ -698,6 +728,7 @@ describe("formatStatusUpdate with detail", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 			threadDetails: [],
 			commentDetails: [
 				{ id: "C_1", author: "user", body: longBody },
@@ -719,6 +750,7 @@ describe("formatStatusUpdate with detail", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
+			lastCommitOid: "",
 			threadDetails: [],
 			commentDetails: [
 				{ id: "C_1", author: "v2nic", body: multilineBody },
@@ -756,7 +788,7 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 			mergeStateStatus: "CLEAN",
 			state: "OPEN",
 			merged: false,
-			commits: { nodes: [{ commit: { checkSuites: { nodes: [] } } }] },
+			commits: { nodes: [{ commit: { oid: "test-oid", checkSuites: { nodes: [] } } }] },
 		};
 		const status = snapshotPR(pr);
 		// c-2 is acknowledged, so only c-1 counts
@@ -794,7 +826,7 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 			mergeStateStatus: "CLEAN",
 			state: "OPEN",
 			merged: false,
-			commits: { nodes: [{ commit: { checkSuites: { nodes: [] } } }] },
+			commits: { nodes: [{ commit: { oid: "test-oid", checkSuites: { nodes: [] } } }] },
 		};
 		const status = snapshotPR(pr);
 		// t-2 is filtered because its last comment has THUMBS_UP
@@ -815,7 +847,7 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 			mergeStateStatus: "CLEAN",
 			state: "OPEN",
 			merged: false,
-			commits: { nodes: [{ commit: { checkSuites: { nodes: [] } } }] },
+			commits: { nodes: [{ commit: { oid: "test-oid", checkSuites: { nodes: [] } } }] },
 		};
 		const status = snapshotPR(pr);
 		expect(status.generalComments).toBe(1);
@@ -835,7 +867,7 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 			mergeStateStatus: "CLEAN",
 			state: "OPEN",
 			merged: false,
-			commits: { nodes: [{ commit: { checkSuites: { nodes: [] } } }] },
+			commits: { nodes: [{ commit: { oid: "test-oid", checkSuites: { nodes: [] } } }] },
 		};
 		const status = snapshotPR(pr);
 		// c-1 has HEART (not THUMBS_UP), so it's kept
@@ -856,6 +888,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
 			failingChecks: [], pendingChecks: [],
 			lastCommentTimestamp: "", lastCommentBySelf: false,
+			lastCommitOid: "",
 			threadDetails: [], commentDetails: [], checkDetails: [],
 		};
 		const result = formatStatusUpdate(null, clean, config);
@@ -867,6 +900,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			unresolvedThreads: 1, generalComments: 0, hasConflicts: false,
 			failingChecks: ["ci/test"], pendingChecks: [],
 			lastCommentTimestamp: "", lastCommentBySelf: false,
+			lastCommitOid: "",
 			threadDetails: [], commentDetails: [],
 			checkDetails: [{ name: "ci/test", conclusion: "FAILURE" }],
 		};
@@ -874,6 +908,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
 			failingChecks: [], pendingChecks: [],
 			lastCommentTimestamp: "", lastCommentBySelf: false,
+			lastCommitOid: "",
 			threadDetails: [], commentDetails: [], checkDetails: [],
 		};
 		const result = formatStatusUpdate(hadIssues, clean, config);
@@ -885,6 +920,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
 			failingChecks: [], pendingChecks: [],
 			lastCommentTimestamp: "", lastCommentBySelf: false,
+			lastCommitOid: "",
 			threadDetails: [], commentDetails: [], checkDetails: [],
 		};
 		const result = formatStatusUpdate(clean, clean, config);
@@ -896,6 +932,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
 			failingChecks: [], pendingChecks: [],
 			lastCommentTimestamp: "", lastCommentBySelf: false,
+			lastCommitOid: "",
 			threadDetails: [], commentDetails: [], checkDetails: [],
 		};
 		const first = formatStatusUpdate(null, clean, config);
@@ -914,6 +951,7 @@ describe("formatFooterStatus", () => {
 		unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
 		failingChecks: [], pendingChecks: [],
 		lastCommentTimestamp: "", lastCommentBySelf: false,
+			lastCommitOid: "",
 		threadDetails: [], commentDetails: [], checkDetails: [],
 	};
 
@@ -1101,5 +1139,65 @@ describe("linkifyPRRefs", () => {
 		expect(result).toBe(
 			`Check ${linkify("https://github.corp.com/owner/repo/pull/42", "owner/repo#42")} and ${linkify("https://github.corp.com/other/repo/pull/99", "https://github.corp.com/other/repo/pull/99")}`,
 		);
+	});
+});
+
+describe("snapshotPR extracts lastCommitOid", () => {
+	it("extracts lastCommitOid from the first commit", () => {
+		const pr = makeMockPR({
+			commits: {
+				nodes: [
+					{
+						commit: {
+							oid: "abc123def456",
+							checkSuites: { nodes: [] },
+							status: null,
+						},
+					},
+				],
+			},
+		});
+		const status = snapshotPR(pr);
+		expect(status.lastCommitOid).toBe("abc123def456");
+	});
+
+	it("returns empty string when no commits", () => {
+		const pr = makeMockPR({ commits: { nodes: [] } });
+		const status = snapshotPR(pr);
+		expect(status.lastCommitOid).toBe("");
+	});
+
+	it("extracts lastCommitOid even with other commit data present", () => {
+		const pr = makeMockPR({
+			commits: {
+				nodes: [
+					{
+						commit: {
+							oid: "sha-98765",
+							checkSuites: {
+								nodes: [
+									{
+										id: "1",
+										conclusion: "FAILURE",
+										status: "COMPLETED",
+										app: { name: "ci/test", slug: "ci-test" },
+										checkRuns: { nodes: [{ name: "ci/test", conclusion: "FAILURE", status: "COMPLETED" }] },
+									},
+								],
+							},
+							status: {
+								state: "FAILURE",
+								contexts: [
+									{ state: "FAILURE", context: "ci/circleci", description: "Failed", targetUrl: null },
+								],
+							},
+						},
+					},
+				],
+			},
+		});
+		const status = snapshotPR(pr);
+		expect(status.lastCommitOid).toBe("sha-98765");
+		expect(status.failingChecks).toContain("ci/test");
 	});
 });

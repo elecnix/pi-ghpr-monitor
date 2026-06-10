@@ -64,6 +64,7 @@ export interface CommitStatusNode {
 
 export interface CommitNode {
 	commit: {
+		oid: string;
 		checkSuites: { nodes: CheckSuiteNode[] };
 		status: CommitStatusNode | null;
 	};
@@ -123,6 +124,8 @@ export interface PRStatus {
 	pendingChecks: string[];
 	lastCommentTimestamp: string;
 	lastCommentBySelf: boolean;
+	/** OID of the latest commit, used for description-staleness detection. */
+	lastCommitOid: string;
 	// Detail for enriched notifications
 	threadDetails: ThreadSummary[];
 	commentDetails: CommentSummary[];
@@ -326,6 +329,10 @@ export function snapshotPR(pr: PullRequestData): PRStatus {
 		}
 	}
 
+	const lastCommitOid = pr.commits.nodes.length > 0
+		? pr.commits.nodes[0].commit.oid
+		: "";
+
 	return {
 		unresolvedThreads: countUnresolvedThreads(pr),
 		generalComments: pr.comments.nodes.filter((c: CommentNode) => !isAcknowledged(c)).length,
@@ -334,6 +341,7 @@ export function snapshotPR(pr: PullRequestData): PRStatus {
 		pendingChecks: pendingChecks(pr),
 		lastCommentTimestamp: getLatestCommentTimestamp(pr),
 		lastCommentBySelf: false,
+		lastCommitOid,
 		threadDetails: threads,
 		commentDetails: comments,
 		checkDetails: checks,

@@ -602,3 +602,111 @@ describe("Footer aggregation simulation", () => {
 		expect(result).toContain("v2nic/repo");
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Description staleness nudge tests
+// ---------------------------------------------------------------------------
+
+describe("Description staleness nudge architecture", () => {
+	it("ActiveMonitor includes knownCommitOid field", () => {
+		expect(src).toContain("knownCommitOid: string | null");
+	});
+
+	it("createActiveMonitor initializes knownCommitOid to null", () => {
+		expect(src).toContain("knownCommitOid: null");
+	});
+
+	it("pollLoop detects commit change and sends staleness nudge", () => {
+		expect(src).toContain("knownCommitOid");
+		// Check the staleness nudge logic block
+		expect(src).toContain("curr.lastCommitOid");
+		expect(src).toContain("mon.knownCommitOid");
+	});
+
+	it("sends staleness nudge only when knownCommitOid differs and is not null", () => {
+		// The logic should check knownCommitOid !== null before nudging
+		expect(src).toContain("mon.knownCommitOid === null");
+	});
+
+	it("uses descriptionStaleness preference with default message", () => {
+		expect(src).toContain("descriptionStaleness");
+		expect(src).toContain("getPreferenceWithDefault");
+		expect(src).toContain("Review the PR description");
+	});
+
+	it("sets knownCommitOid on first poll without nudging", () => {
+		// The first-poll case sets knownCommitOid without sending a nudge
+		const stalenessBlock = src.slice(
+			src.indexOf("Description staleness nudge"),
+			src.indexOf("Description staleness nudge") + 800,
+		);
+		expect(stalenessBlock).toContain("mon.knownCommitOid === null");
+		expect(stalenessBlock).toContain("mon.knownCommitOid = curr.lastCommitOid");
+	});
+
+	it("deduplicates staleness nudge by tracking commit OID", () => {
+		// Only fires once per commit OID change
+		expect(src).toContain("mon.knownCommitOid = curr.lastCommitOid");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Simulated staleness nudge logic tests
+// ---------------------------------------------------------------------------
+
+describe("Description staleness nudge simulation", () => {
+	interface SimMonitor {
+		knownCommitOid: string | null;
+	}
+
+	function shouldNudgeStaleness(
+		mon: SimMonitor,
+		currentCommitOid: string,
+	): boolean {
+		// First poll: skip nudging (knownCommitOid starts as null)
+		if (mon.knownCommitOid === null) {
+			return false;
+		}
+		// Subsequent polls: nudge if commit changed
+		return currentCommitOid !== mon.knownCommitOid;
+	}
+
+	it("does not nudge on first poll (knownCommitOid is null)", () => {
+		const mon: SimMonitor = { knownCommitOid: null };
+		expect(shouldNudgeStaleness(mon, "abc123")).toBe(false);
+	});
+
+	it("does not nudge when commit OID has not changed", () => {
+		const mon: SimMonitor = { knownCommitOid: "abc123" };
+		expect(shouldNudgeStaleness(mon, "abc123")).toBe(false);
+	});
+
+	it("nudges when commit OID changes", () => {
+		const mon: SimMonitor = { knownCommitOid: "abc123" };
+		expect(shouldNudgeStaleness(mon, "def456")).toBe(true);
+	});
+
+	it("does not nudge again for same commit after change", () => {
+		const mon: SimMonitor = { knownCommitOid: "def456" };
+		expect(shouldNudgeStaleness(mon, "def456")).toBe(false);
+	});
+
+	it("nudges for each distinct commit change", () => {
+		const mon: SimMonitor = { knownCommitOid: "abc123" };
+		expect(shouldNudgeStaleness(mon, "def456")).toBe(true);
+		// After processing, knownCommitOid would be updated to "def456"
+		const mon2: SimMonitor = { knownCommitOid: "def456" };
+		expect(shouldNudgeStaleness(mon2, "ghi789")).toBe(true);
+	});
+
+	it("does not nudge when empty commit OID", () => {
+		// If no commits are present (lastCommitOid is empty string)
+		const mon: SimMonitor = { knownCommitOid: "" };
+		expect(shouldNudgeStaleness(mon, "")).toBe(false);
+	});
+
+	it("nudges when transitioning from empty to non-empty", () => {
+		const mon: SimMonitor = { knownCommitOid: "" };
+		expect(shouldNudgeStaleness(mon, "abc123")).toBe(true);
+	});
+});

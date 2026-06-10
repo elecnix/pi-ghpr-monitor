@@ -103,6 +103,7 @@ export function logPRSnapshot(pr: {
 	commits: {
 		nodes: Array<{
 			commit: {
+				oid: string;
 				checkSuites: { nodes: Array<{ conclusion: string | null; status: string; app: { name: string; slug: string }; checkRuns: { nodes: Array<{ name: string; conclusion: string | null; status: string }> } }> };
 				status: { state: string; contexts: Array<{ state: string; context: string }> } | null;
 			};
@@ -113,6 +114,7 @@ export function logPRSnapshot(pr: {
 	log(`  comments: ${pr.comments.nodes.length}, unresolved threads: ${pr.reviewThreads.nodes.filter(t => !t.isResolved).length}`);
 
 	for (const commit of pr.commits.nodes) {
+		log(`  commit: ${commit.commit.oid}`);
 		log(`  checkSuites: ${commit.commit.checkSuites.nodes.length}`);
 		for (const suite of commit.commit.checkSuites.nodes) {
 			const runs = suite.checkRuns.nodes.map(r => `${r.name}=${r.conclusion ?? r.status}`).join(", ");
@@ -140,12 +142,16 @@ export function logStatus(status: {
 	pendingChecks: string[];
 	failingStatuses?: string[];
 	pendingStatuses?: string[];
+	lastCommitOid?: string;
 }): void {
 	log(`Status: threads=${status.unresolvedThreads}, comments=${status.generalComments}, conflicts=${status.hasConflicts}`);
 	log(`  failingChecks: [${status.failingChecks.join(", ")}]`);
 	log(`  pendingChecks: [${status.pendingChecks.join(", ")}]`);
 	log(`  failingStatuses: [${(status.failingStatuses ?? []).join(", ")}]`);
 	log(`  pendingStatuses: [${(status.pendingStatuses ?? []).join(", ")}]`);
+	if (status.lastCommitOid !== undefined) {
+		log(`  lastCommitOid: ${status.lastCommitOid}`);
+	}
 }
 
 /**
