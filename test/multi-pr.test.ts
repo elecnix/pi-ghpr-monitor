@@ -306,7 +306,7 @@ describe("Multi-PR architecture structure", () => {
 		);
 		expect(statusBlock).toContain("monitors.size");
 		expect(statusBlock).toContain("activeMonitors: monitors.size");
-		expect(statusBlock).toContain("for (const [key, mon] of monitors)");
+		expect(statusBlock).toContain("buildDetailedStatusLines()");
 	});
 
 	it("tool check action can check all or specific monitor", () => {
