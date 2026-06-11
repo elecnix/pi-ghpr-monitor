@@ -360,12 +360,26 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	 * delivery mechanism because it creates a proper UserMessage with content control.
 	 * Error messages intentionally avoid pi.sendMessage() entirely and use uiCtx.notify()
 	 * instead — transient TUI notifications that never enter the session or LLM context.
+	 *
+	 * IMPORTANT: Always use prLabel (owner/repo#number) in notification text, never
+	 * the full PR URL (prUrl). linkifyPRRefs converts prLabel into a compact OSC 8
+	 * hyperlink (display: owner/repo#number, href: full URL). Using prUrl causes
+	 * triplicated URLs because linkifyPRRefs wraps the full URL in an OSC 8 hyperlink
+	 * whose display text contains the same URL, and if the terminal doesn't support
+	 * OSC 8, both the href and display text are shown as raw text.
 	 */
 	function sendPRNotification(concise: string, detailed: string, options?: { deliverAs?: "steer" | "followUp"; host?: string }) {
 		const delivery = options?.deliverAs ?? "steer";
 		const linkifyHost = options?.host ?? "github.com";
-		const linkifiedDetailed = linkifyPRRefs(detailed, linkifyHost);
-		const linkifiedConcise = linkifyPRRefs(concise, linkifyHost);
+		// The detailed message is delivered via pi.sendUserMessage() and rendered
+		// by pi-tui's Markdown component, which re-linkifies URLs embedded in raw
+		// OSC 8 escapes (producing doubled/tripled output). Use markdown link
+		// syntax — the Markdown component renders that into a single clean OSC 8
+		// hyperlink (or a `display (url)` fallback when OSC 8 is unsupported).
+		const markdownDetailed = linkifyPRRefs(detailed, linkifyHost, "markdown");
+		// The concise message feeds the footer/CustomMessage Text renderer, which
+		// handles raw OSC 8 escapes correctly via wrapTextWithAnsi().
+		const linkifiedConcise = linkifyPRRefs(concise, linkifyHost, "osc8");
 
 		// Deliver detailed content to the agent via UserMessage.
 		// pi.sendUserMessage() creates a UserMessage that is injected into the
@@ -375,22 +389,23 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		// CustomMessage -> convertToLlm(), so error messages must NOT use it —
 		// they use uiCtx.notify() instead to stay TUI-only.
 		//
-		// Both the UserMessage (detailed) and the CustomMessage (concise) are
-		// linkified with OSC 8 hyperlinks so PR references are clickable in
-		// terminals that support the protocol. The LLM sees the linkified text
-		// but the OSC 8 escape sequences are non-printing and harmless.
+		// The UserMessage (detailed) uses markdown link syntax because
+		// UserMessageComponent renders via pi-tui's Markdown component. The
+		// CustomMessage concise uses raw OSC 8 because its renderer uses pi-tui's
+		// Text component. Both produce a single clean OSC 8 hyperlink in the TUI.
 		if (delivery) {
-			pi.sendUserMessage(linkifiedDetailed, { deliverAs: delivery });
+			pi.sendUserMessage(markdownDetailed, { deliverAs: delivery });
 		}
 
 		// Emit a CustomMessage for the registered message renderer.
 		// When a UserMessage is also being sent (delivery is set), display:false
 		// avoids a duplicate visible message — the UserMessage already appears in
 		// the TUI. When no UserMessage is sent (delivery is undefined/null),
-		// display:true makes the CustomMessage the visible notification.
+		// display:true makes the CustomMessage the visible notification (rendered
+		// by the Text component, hence raw OSC 8 in details.concise).
 		pi.sendMessage({
 			customType: "ghpr-monitor",
-			content: linkifiedDetailed,
+			content: markdownDetailed,
 			display: !delivery,
 			details: { concise: linkifiedConcise },
 		});
@@ -585,11 +600,14 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 
 				// Check if PR was merged or closed
 				if (pr.state === "MERGED" || pr.state === "CLOSED") {
-					const prLabel = `${config.owner}/${config.repo}#${config.number}`;
-					const prUrl = `https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
-					const reason = pr.merged ? "merged" : "closed";
-					const concise = `${pr.merged ? "🔀" : "❌"} PR ${prLabel} was ${reason}. Monitoring stopped.`;
-					const detailed = `${pr.merged ? "🔀" : "❌"} PR ${prUrl} was ${reason}. Monitoring stopped.`;
+					// IMPORTANT: Use prLabel (owner/repo#number) in notification text, NOT prUrl.
+				// linkifyPRRefs converts prLabel into a compact OSC 8 hyperlink.
+				// Using prUrl causes triplicated URLs when linkifyPRRefs wraps the
+				// full URL in a second hyperlink whose display text also contains the URL.
+				const prLabel = `${config.owner}/${config.repo}#${config.number}`;
+				const reason = pr.merged ? "merged" : "closed";
+				const concise = `${pr.merged ? "🔀" : "❌"} PR ${prLabel} was ${reason}. Monitoring stopped.`;
+				const detailed = `${pr.merged ? "🔀" : "❌"} PR ${prLabel} was ${reason}. Monitoring stopped.`;
 					sendPRNotification(concise, detailed, {deliverAs: "steer", host: config.host});
 					const key = prKey(config);
 					monitors.delete(key);
@@ -632,12 +650,13 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				// Force-check: always consume the flag so /ghpr-monitor check is never
 				// a no-op. When the agent is active, queue the result for flush on turn_end.
 				if (mon.forceNotify) {
+					// IMPORTANT: Use prLabel (owner/repo#number) in notification text, NOT prUrl.
+					// See the merged/closed notification above for why.
 					const prLabel = `${config.owner}/${config.repo}#${config.number}`;
-					const prUrl = `https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
 					const items = formatActionableItems(curr, config, currentPreferences);
 					const detItems = formatAgentNotification(curr, config, currentPreferences);
 					const msg = items ?? `\u2705 No issues found on ${prLabel}`;
-					const detMsg = detItems?.detailed ?? `\u2705 No issues found on ${prUrl}`;
+					const detMsg = detItems?.detailed ?? `\u2705 No issues found on ${prLabel}`;
 					if (agentTurnActive) {
 						queuedForceChecks.push({ concise: msg, detailed: detMsg, host: config.host, monitorKey: prKey(config) });
 					} else {

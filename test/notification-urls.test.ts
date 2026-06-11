@@ -55,7 +55,7 @@ describe("linkifyPRRefs: trailing ellipsis after PR ref", () => {
 		const input = "📡 Monitoring https://github.com/v2nic/pi-ghpr-monitor/pull/42... (polling every 60s)";
 		const result = linkifyPRRefs(input);
 		expect(result).toBe(
-			`📡 Monitoring ${linkify("https://github.com/v2nic/pi-ghpr-monitor/pull/42", "https://github.com/v2nic/pi-ghpr-monitor/pull/42")}... (polling every 60s)`,
+			`📡 Monitoring ${linkify("https://github.com/v2nic/pi-ghpr-monitor/pull/42", "v2nic/pi-ghpr-monitor#42")}... (polling every 60s)`,
 		);
 		expect(result).not.toContain("pull/42...");
 	});

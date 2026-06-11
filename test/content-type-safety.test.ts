@@ -64,10 +64,10 @@ describe("sendPRNotification always receives strings, not objects", () => {
 		expect(fnBody).not.toBeNull();
 
 		// The sendPRNotification function should assign a string value
-		// to the content field, never an object. This can be either `detailed`
-		// directly or `linkifiedDetailed` (which is derived from `detailed`
-		// via linkifyPRRefs and is always a string).
-		const hasDetailed = fnBody!.includes("content: detailed") || fnBody!.includes("content: linkifiedDetailed");
+		// to the content field, never an object. This can be `detailed`
+		// directly or `markdownDetailed` (derived from `detailed` via
+		// linkifyPRRefs and always a string).
+		const hasDetailed = fnBody!.includes("content: detailed") || fnBody!.includes("content: markdownDetailed") || fnBody!.includes("content: linkifiedDetailed");
 		expect(hasDetailed).toBe(true);
 	});
 
@@ -217,9 +217,9 @@ describe("sendPRNotification always receives strings, not objects", () => {
 		expect(fnBody).not.toBeNull();
 
 		// The function should use a string value for the content field
-		// (either `detailed` directly or `linkifiedDetailed` derived from it)
+		// (`detailed` directly or `markdownDetailed` derived from it)
 		// This ensures the type system enforces string content at compile time
-		const hasDetailed = fnBody!.includes("content: detailed,") || fnBody!.includes("content: linkifiedDetailed");
+		const hasDetailed = fnBody!.includes("content: detailed,") || fnBody!.includes("content: markdownDetailed") || fnBody!.includes("content: linkifiedDetailed");
 		expect(hasDetailed).toBe(true);
 	});
 });
