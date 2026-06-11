@@ -734,6 +734,119 @@ export function formatFooterStatus(config: MonitorConfig, status: PRStatus | nul
 // ---------------------------------------------------------------------------
 
 /**
+ * Parse a unified diff hunk header like `@@ -40,7 +40,7 @@` and return
+ * the starting line number for the new (right-side) file.
+ * Returns null if the header cannot be parsed.
+ */
+function parseDiffHunkHeader(hunk: string): { oldStart: number; newStart: number } | null {
+	// Match @@ -oldStart[,oldCount] +newStart[,newCount] @@
+	const match = hunk.match(/^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/);
+	if (!match) return null;
+	return { oldStart: parseInt(match[1], 10), newStart: parseInt(match[2], 10) };
+}
+
+/**
+ * Given a diff hunk and a target line number (1-based, in the new file),
+ * extract a focused window around that line and highlight it.
+ *
+ * If the target line is found within the hunk, returns a subset of lines
+ * centered on the target with CONTEXT_LINES of surrounding context,
+ * and marks the target line with a `>>>` prefix.
+ *
+ * If the target line is not found (or line is null/undefined), falls back
+ * to showing the entire hunk with a MAX_DIFF_LINES truncation limit.
+ */
+const CONTEXT_LINES = 3;
+const MAX_DIFF_LINES = 20;
+
+function formatDiffExcerpt(diffHunk: string, targetLine: number | null | undefined): string {
+	const diffLines = diffHunk.split(/\r?\n/);
+
+	// Find the hunk header line
+	const headerIdx = diffLines.findIndex(l => l.startsWith("@@"));
+	if (headerIdx < 0) {
+		// No hunk header found; fall back to simple truncation
+		return formatDiffLinesTruncated(diffLines);
+	}
+
+	const header = parseDiffHunkHeader(diffLines[headerIdx]!);
+	if (!header) {
+		return formatDiffLinesTruncated(diffLines);
+	}
+
+	// If we have a target line number, try to find and highlight it
+	if (targetLine != null) {
+		// Map diff lines to new-file line numbers
+		// Lines after the header: ' ' = context (new-file line advances),
+		// '-' = removed (skipped — no new-file line), '+' = added (new-file line advances)
+		let newLine = header.newStart;
+		let targetIdx = -1;
+		const lineMap: { idx: number; newLine: number }[] = [];
+
+		for (let i = headerIdx + 1; i < diffLines.length; i++) {
+			const line = diffLines[i]!;
+			const ch = line[0];
+
+			if (ch === "\\" && line.startsWith("\\ ")) {
+				// "No newline at end of file" marker — skip
+				continue;
+			}
+
+			if (ch === "-") {
+				// Removed line: not present in the new file, so skip it
+				continue;
+			}
+
+			// '+' or ' ' or anything else: new side advances
+			lineMap.push({ idx: i, newLine });
+
+			if (newLine === targetLine) {
+				targetIdx = lineMap.length - 1;
+			}
+
+			newLine++;
+		}
+
+		if (targetIdx >= 0) {
+			// Found the target line — extract window around it
+			const start = Math.max(0, targetIdx - CONTEXT_LINES);
+			const end = Math.min(lineMap.length - 1, targetIdx + CONTEXT_LINES);
+			const result: string[] = [];
+
+			// Always include the hunk header
+			result.push(`  ${diffLines[headerIdx]!}`);
+
+			for (let j = start; j <= end; j++) {
+				const { idx, newLine: ln } = lineMap[j]!;
+				const prefix = j === targetIdx ? ">>>" : "   ";
+				result.push(`${prefix} ${ln} | ${diffLines[idx]!}`);
+			}
+
+			return result.join("\n");
+		}
+	}
+
+	// Fallback: no target line or target not found — show truncated hunk
+	return formatDiffLinesTruncated(diffLines);
+}
+
+/**
+ * Fallback formatter: show diff lines with simple truncation at MAX_DIFF_LINES.
+ */
+function formatDiffLinesTruncated(diffLines: string[]): string {
+	const truncated = diffLines.length > MAX_DIFF_LINES;
+	const showLines = truncated ? diffLines.slice(0, MAX_DIFF_LINES) : diffLines;
+	const result: string[] = [];
+	for (const diffLine of showLines) {
+		result.push(`  ${diffLine}`);
+	}
+	if (truncated) {
+		result.push("  …truncated");
+	}
+	return result.join("\n");
+}
+
+/**
  * Format a thread detail block for the agent, including full comment bodies,
  * file path, line number, and all comments in the conversation.
  */
@@ -756,16 +869,7 @@ function formatThreadDetailBlock(thread: ThreadSummary): string {
 			lines.push(`  ${c.author}${cmtLocation} (id: ${c.id}, restApiId: ${c.restApiId}): ${c.fullBody ?? c.body}`);
 			if (c.diffHunk) {
 				lines.push("  ```diff");
-				const diffLines = c.diffHunk.split(/\r?\n/);
-				const MAX_DIFF_LINES = 20;
-				const truncated = diffLines.length > MAX_DIFF_LINES;
-				const showLines = truncated ? diffLines.slice(0, MAX_DIFF_LINES) : diffLines;
-				for (const diffLine of showLines) {
-					lines.push(`  ${diffLine}`);
-				}
-				if (truncated) {
-					lines.push("  …truncated");
-				}
+				lines.push(formatDiffExcerpt(c.diffHunk, c.line ?? thread.line));
 				lines.push("  ```");
 			}
 		}

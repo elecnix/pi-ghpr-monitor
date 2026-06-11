@@ -924,7 +924,7 @@ describe("snapshotPR maps diffHunk from GraphQL to CommentSummary", () => {
 });
 
 describe("formatThreadDetailBlock includes diffHunk as code block", () => {
-	it("includes diffHunk as a diff code block when present", () => {
+	it("highlights the anchored line in diffHunk", () => {
 		const status = makeMockStatus({
 			unresolvedThreads: 1,
 			threadDetails: [
@@ -957,8 +957,11 @@ describe("formatThreadDetailBlock includes diffHunk as code block", () => {
 
 		expect(result!.detailed).toContain("  ```diff");
 		expect(result!.detailed).toContain("  @@ -40,7 +40,7 @@");
-		expect(result!.detailed).toContain("  -  const token = getOldToken();");
-		expect(result!.detailed).toContain("  +  const token = getToken();");
+		// Line 42 is the anchored line - highlighted with >>>
+		expect(result!.detailed).toContain(">>> 42 |    return token;");
+		// Context lines show line numbers
+		expect(result!.detailed).toContain("   40 |  export function login() {");
+		expect(result!.detailed).toContain("   41 | +  const token = getToken();");
 		expect(result!.detailed).toContain("  ```");
 	});
 
@@ -1007,7 +1010,7 @@ describe("formatThreadDetailBlock includes diffHunk as code block", () => {
 					lastCommentBody: "Fix this",
 					fullBody: "Fix this",
 					path: "src/file.ts",
-					line: 10,
+					line: 2, // +new line maps to line 2 in new file
 					allComments: [
 						{
 							id: "RC_1",
@@ -1016,7 +1019,7 @@ describe("formatThreadDetailBlock includes diffHunk as code block", () => {
 							body: "Fix this",
 							fullBody: "Fix this",
 							path: "src/file.ts",
-							line: 10,
+							line: 2,
 							diffHunk: crlfDiff,
 						},
 					],
@@ -1027,13 +1030,13 @@ describe("formatThreadDetailBlock includes diffHunk as code block", () => {
 		const result = formatAgentNotification(status, config);
 		expect(result).not.toBeNull();
 
-		expect(result!.detailed).toContain("  context line");
-		expect(result!.detailed).toContain("  -old line");
-		expect(result!.detailed).toContain("  +new line");
+		// CRLF should be stripped; anchored line (2) should be highlighted
+		expect(result!.detailed).toContain(">>> 2 | +new line");
+		expect(result!.detailed).toContain("   1 |  context line");
 		expect(result!.detailed).not.toContain("\r");
 	});
 
-	it("truncates long diffHunk to 20 lines with …truncated marker", () => {
+	it("focuses long diffHunk around the anchored line with context window", () => {
 		const longDiff = "@@ -1,25 +1,25 @@\n" + Array.from({ length: 25 }, (_, i) => ` line ${i + 1}`).join("\n");
 		const status = makeMockStatus({
 			unresolvedThreads: 1,
@@ -1065,14 +1068,25 @@ describe("formatThreadDetailBlock includes diffHunk as code block", () => {
 		const result = formatAgentNotification(status, config);
 		expect(result).not.toBeNull();
 
-		expect(result!.detailed).toContain("  …truncated");
-		expect(result!.detailed).toContain("  line 19");
-		expect(result!.detailed).not.toContain("  line 20");
+		// Should show the anchored line (10) highlighted with >>>
+		expect(result!.detailed).toContain(">>> 10 |  line 10");
+		// Should show context lines around the anchored line
+		expect(result!.detailed).toContain("   7 |  line 7");
+		expect(result!.detailed).toContain("   8 |  line 8");
+		expect(result!.detailed).toContain("   9 |  line 9");
+		expect(result!.detailed).toContain("   11 |  line 11");
+		expect(result!.detailed).toContain("   12 |  line 12");
+		expect(result!.detailed).toContain("   13 |  line 13");
+		// Should NOT show lines far from the anchored line
+		expect(result!.detailed).not.toContain(" 1 |  line 1");
+		expect(result!.detailed).not.toContain(" 25 |  line 25");
+		// Should NOT contain truncated marker (we show a focused window instead)
+		expect(result!.detailed).not.toContain("…truncated");
 	});
 });
 
 describe("formatAgentNotification includes diff context in detailed output", () => {
-	it("includes diff context for review thread comments", () => {
+	it("highlights anchored line in diff context for review thread comments", () => {
 		const status = makeMockStatus({
 			unresolvedThreads: 1,
 			threadDetails: [
@@ -1104,8 +1118,11 @@ describe("formatAgentNotification includes diff context in detailed output", () 
 		expect(result).not.toBeNull();
 
 		expect(result!.detailed).toContain("  ```diff");
-		expect(result!.detailed).toContain("  -  const token = getOldToken();");
-		expect(result!.detailed).toContain("  +  const token = getToken();");
+		// Line 42 is the anchored line - highlighted with >>>
+		expect(result!.detailed).toContain(">>> 42 |    return token;");
+		// Context lines show line numbers
+		expect(result!.detailed).toContain("   40 |  export function login() {");
+		expect(result!.detailed).toContain("   41 | +  const token = getToken();");
 		expect(result!.detailed).toContain("  ```");
 	});
 
@@ -1132,7 +1149,7 @@ describe("formatAgentNotification includes diff context in detailed output", () 
 });
 
 describe("formatAgentStatusUpdate includes diff context for new threads", () => {
-	it("includes diffHunk for new threads", () => {
+	it("highlights anchored line in diffHunk for new threads", () => {
 		const prev = makeMockStatus({
 			unresolvedThreads: 0,
 			threadDetails: [],
@@ -1147,7 +1164,7 @@ describe("formatAgentStatusUpdate includes diff context for new threads", () => 
 					lastCommentBody: "New thread",
 					fullBody: "Please review this change",
 					path: "src/index.ts",
-					line: 10,
+					line: 9, // +added line maps to line 9 in new file
 					allComments: [
 						{
 							id: "RC_new",
@@ -1156,7 +1173,7 @@ describe("formatAgentStatusUpdate includes diff context for new threads", () => 
 							body: "New thread",
 							fullBody: "Please review this change",
 							path: "src/index.ts",
-							line: 10,
+							line: 9, // +added line maps to line 9 in new file
 							diffHunk: "@@ -8,3 +8,3 @@\n context line\n-removed line\n+added line",
 						},
 					],
@@ -1166,7 +1183,225 @@ describe("formatAgentStatusUpdate includes diff context for new threads", () => 
 
 		const result = formatAgentStatusUpdate(prev, curr, config);
 		expect(result.detailed).toContain("  ```diff");
-		expect(result.detailed).toContain("  -removed line");
-		expect(result.detailed).toContain("  +added line");
+		// Line 9 is the anchored line (+added line)
+		expect(result.detailed).toContain(">>> 9 | +added line");
+		// Context line (line 8)
+		expect(result.detailed).toContain("   8 |  context line");
+	});
+});
+
+describe("formatDiffExcerpt edge cases", () => {
+	it("falls back to truncation when line is null", () => {
+		const status = makeMockStatus({
+			unresolvedThreads: 1,
+			threadDetails: [
+				{
+					id: "PRRT_1",
+					isResolved: false,
+					lastCommentAuthor: "reviewer",
+					lastCommentBody: "Note",
+					fullBody: "Note",
+					path: "src/app.ts",
+					// line is null (file-level comment)
+					allComments: [
+						{
+							id: "RC_1",
+							restApiId: "500",
+							author: "reviewer",
+							body: "Note",
+							fullBody: "Note",
+							path: "src/app.ts",
+							// No line number
+							diffHunk: "@@ -1,5 +1,5 @@\n line1\n line2\n line3\n line4\n line5",
+						},
+					],
+				},
+			],
+		});
+
+		const result = formatAgentNotification(status, config);
+		expect(result).not.toBeNull();
+		// Without a target line, should fall back to showing the full hunk with truncation
+		expect(result!.detailed).toContain("  ```diff");
+		expect(result!.detailed).toContain("  @@");
+		// Should NOT contain >>> anchored line markers (no line to anchor to)
+		expect(result!.detailed).not.toContain(">>>");
+	});
+
+	it("falls back to truncation when line number is not found in diff hunk", () => {
+		const status = makeMockStatus({
+			unresolvedThreads: 1,
+			threadDetails: [
+				{
+					id: "PRRT_1",
+					isResolved: false,
+					lastCommentAuthor: "reviewer",
+					lastCommentBody: "Note",
+					fullBody: "Note",
+					path: "src/app.ts",
+					line: 999, // Line number not in the hunk
+					allComments: [
+						{
+							id: "RC_1",
+							restApiId: "501",
+							author: "reviewer",
+							body: "Note",
+							fullBody: "Note",
+							path: "src/app.ts",
+							line: 999,
+							diffHunk: "@@ -1,3 +1,3 @@\n line1\n line2\n line3",
+						},
+					],
+				},
+			],
+		});
+
+		const result = formatAgentNotification(status, config);
+		expect(result).not.toBeNull();
+		// Line 999 not found — should fall back to truncated display
+		expect(result!.detailed).toContain("  ```diff");
+		expect(result!.detailed).not.toContain(">>>");
+	});
+
+	it("highlights anchored line on a large added-file diff like copilot reviews", () => {
+		// Simulates the real-world case: copilot review comment on line 21
+		// of a 146-line added file, diff starts @@ -0,0 +1,146 @@
+		const lines = [
+			"/**",
+			" * Structured session digest",
+			" */",
+			"import type { AnalysisNodeRow } from '../../types.js';",
+			"",
+			"export interface DigestSegment {",
+			"  index: number;",
+			"  text: string;",
+			"}",
+			"",
+			"export interface SessionDigest {",
+			"  summary: string;",
+			"  segments: DigestSegment[];",
+			"}",
+			"",
+			"function buildDigestSegment(entries: AnalysisNodeRow[]): DigestSegment {",
+			"  const text = entries.map(e => e.content).join('\\n');",
+			"  return { index: entries[0].index, text };",
+			"}",
+			"",
+			"// ... more lines ...",
+			"export function compileDigest(rows: AnalysisNodeRow[]): SessionDigest {",
+			"  const segments: DigestSegment[] = [];",
+			"  let current: AnalysisNodeRow[] = [];",
+			"  // 60+ more lines...",
+			"  return { summary: '', segments };",
+			"}",
+		];
+		const diffHunk = "@@ -0,0 +1,146 @@\n" + lines.map((l, i) => `+${l}`).join("\n");
+
+		const status = makeMockStatus({
+			unresolvedThreads: 1,
+			threadDetails: [
+				{
+					id: "PRRT_kwDOSoDSZ86IsWUG",
+					isResolved: false,
+					lastCommentAuthor: "copilot-pull-request-reviewer",
+					lastCommentBody: "Role naming is inconsistent",
+					fullBody: "Role naming is inconsistent across the new analyzers",
+					path: "src/analyze/analyzers/session-overview/digest.ts",
+					line: 21, // Line 21 in the diff
+					allComments: [
+						{
+							id: "PRRC_kwDOSoDSZ87KQVtL",
+							restApiId: "3393280843",
+							author: "copilot-pull-request-reviewer",
+							body: "Role naming is inconsistent",
+							fullBody: "Role naming is inconsistent across the new analyzers",
+							path: "src/analyze/analyzers/session-overview/digest.ts",
+							line: 21,
+							diffHunk,
+						},
+					],
+				},
+			],
+		});
+
+		const result = formatAgentNotification(status, config);
+		expect(result).not.toBeNull();
+
+		// Should highlight line 21 (the anchored line) with >>>
+		expect(result!.detailed).toContain(">>> 21 | +// ... more lines ...");
+		// Should show context lines around line 21
+		expect(result!.detailed).toContain("   18 | +  return { index: entries[0].index, text };");
+		expect(result!.detailed).toContain("   19 | +}");
+		expect(result!.detailed).toContain("   22 | +export function compileDigest");
+		// Should NOT show lines far from line 21
+		expect(result!.detailed).not.toContain("   1 | +/**");
+	});
+
+	it("uses comment-level line when available, falls back to thread-level line", () => {
+		const status = makeMockStatus({
+			unresolvedThreads: 1,
+			threadDetails: [
+				{
+					id: "PRRT_1",
+					isResolved: false,
+					lastCommentAuthor: "reviewer",
+					lastCommentBody: "Fix this",
+					fullBody: "Fix this",
+					path: "src/app.ts",
+					line: 5, // Thread-level line (used as fallback)
+					allComments: [
+						{
+							id: "RC_1",
+							restApiId: "502",
+							author: "reviewer",
+							body: "Fix this",
+							fullBody: "Fix this",
+							path: "src/app.ts",
+							line: 5,
+							diffHunk: "@@ -3,5 +3,5 @@\n line3\n line4\n line5\n line6\n line7",
+						},
+					],
+				},
+			],
+		});
+
+		const result = formatAgentNotification(status, config);
+		expect(result).not.toBeNull();
+		// Line 5 should be anchored
+		expect(result!.detailed).toContain(">>> 5 |  line5");
+	});
+
+	it("falls back to thread-level line when comment-level line is missing", () => {
+		const status = makeMockStatus({
+			unresolvedThreads: 1,
+			threadDetails: [
+				{
+					id: "PRRT_1",
+					isResolved: false,
+					lastCommentAuthor: "reviewer",
+					lastCommentBody: "Fix this",
+					fullBody: "Fix this",
+					path: "src/app.ts",
+					line: 5, // Thread-level line
+					allComments: [
+						{
+							id: "RC_1",
+							restApiId: "503",
+							author: "reviewer",
+							body: "Fix this",
+							fullBody: "Fix this",
+							path: "src/app.ts",
+							// No line on the comment — uses thread.line
+							diffHunk: "@@ -3,5 +3,5 @@\n line3\n line4\n line5\n line6\n line7",
+						},
+					],
+				},
+			],
+		});
+
+		const result = formatAgentNotification(status, config);
+		expect(result).not.toBeNull();
+		// Thread-level line (5) should be used as fallback
+		expect(result!.detailed).toContain(">>> 5 |  line5");
 	});
 });
