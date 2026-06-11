@@ -32,6 +32,8 @@ export interface CommentNode {
 	path?: string;
 	/** Line number (only on PullRequestReviewComment, not IssueComment) */
 	line?: number | null;
+	/** Diff context around the comment (only on PullRequestReviewComment) */
+	diffHunk?: string;
 }
 
 export interface ReviewThreadNode {
@@ -118,6 +120,8 @@ export interface CommentSummary {
 	path?: string;
 	/** Line number (only on review comments, not general PR comments) */
 	line?: number | null;
+	/** Diff context around the comment (only on review comments) */
+	diffHunk?: string;
 }
 
 export interface CheckSummary {
@@ -316,6 +320,7 @@ export function snapshotPR(pr: PullRequestData): PRStatus {
 					fullBody: c.body,
 					path: c.path,
 					line: c.line,
+					diffHunk: c.diffHunk,
 				})),
 			};
 		});
@@ -749,6 +754,20 @@ function formatThreadDetailBlock(thread: ThreadSummary): string {
 				? ` (${c.path}${c.line != null ? `:${c.line}` : ""})`
 				: "";
 			lines.push(`  ${c.author}${cmtLocation} (id: ${c.id}, restApiId: ${c.restApiId}): ${c.fullBody ?? c.body}`);
+			if (c.diffHunk) {
+				lines.push("  ```diff");
+				const diffLines = c.diffHunk.split(/\r?\n/);
+				const MAX_DIFF_LINES = 20;
+				const truncated = diffLines.length > MAX_DIFF_LINES;
+				const showLines = truncated ? diffLines.slice(0, MAX_DIFF_LINES) : diffLines;
+				for (const diffLine of showLines) {
+					lines.push(`  ${diffLine}`);
+				}
+				if (truncated) {
+					lines.push("  …truncated");
+				}
+				lines.push("  ```");
+			}
 		}
 	} else {
 		// Fallback: only last comment available

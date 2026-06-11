@@ -833,3 +833,340 @@ describe("edge cases for enriched notifications", () => {
 		expect(result!.detailed).not.toContain("Thread PRRT_2 ()");
 	});
 });
+// ---------------------------------------------------------------------------
+// diffHunk tests
+// ---------------------------------------------------------------------------
+
+describe("snapshotPR maps diffHunk from GraphQL to CommentSummary", () => {
+	it("maps diffHunk from review thread comments to CommentSummary.diffHunk", () => {
+		const pr: PullRequestData = makeMockPR({
+			reviewThreads: {
+				nodes: [
+					{
+						id: "PRRT_1",
+							isResolved: false,
+						comments: {
+							nodes: [
+								{
+									id: "RC_1",
+									fullDatabaseId: "201",
+									body: "Please fix the typo",
+									author: { login: "reviewer" },
+									createdAt: "2024-01-01T00:00:00Z",
+									reactions: { nodes: [] },
+									path: "src/auth/login.ts",
+									line: 42,
+									diffHunk: "@@ -40,7 +40,7 @@\n export function login() {\n-  const token = getOldToken();\n+  const token = getToken();\n   return token;\n }",
+								},
+							],
+						},
+					},
+				] as ReviewThreadNode[],
+			},
+		});
+
+		const status = snapshotPR(pr);
+		expect(status.threadDetails).toHaveLength(1);
+		const thread = status.threadDetails[0];
+		expect(thread.allComments).toHaveLength(1);
+		expect(thread.allComments![0].diffHunk).toBe("@@ -40,7 +40,7 @@\n export function login() {\n-  const token = getOldToken();\n+  const token = getToken();\n   return token;\n }");
+	});
+
+	it("maps diffHunk as undefined when not present", () => {
+		const pr: PullRequestData = makeMockPR({
+			reviewThreads: {
+				nodes: [
+					{
+						id: "PRRT_1",
+							isResolved: false,
+						comments: {
+							nodes: [
+								{
+									id: "RC_1",
+									fullDatabaseId: "202",
+									body: "General review comment",
+									author: { login: "reviewer" },
+									createdAt: "2024-01-01T00:00:00Z",
+									reactions: { nodes: [] },
+								},
+							],
+						},
+					},
+				] as ReviewThreadNode[],
+			},
+		});
+
+		const status = snapshotPR(pr);
+		const thread = status.threadDetails[0];
+		expect(thread.allComments![0].diffHunk).toBeUndefined();
+	});
+
+	it("does not add diffHunk to general comments (IssueComments)", () => {
+		const pr: PullRequestData = makeMockPR({
+			comments: {
+				nodes: [
+					{
+						id: "C_1",
+						databaseId: 301,
+						body: "General comment",
+						author: { login: "bot" },
+						createdAt: "2024-01-01T00:00:00Z",
+						reactions: { nodes: [] },
+					} as CommentNode,
+				],
+			},
+		});
+
+		const status = snapshotPR(pr);
+		expect(status.commentDetails).toHaveLength(1);
+		expect((status.commentDetails[0] as any).diffHunk).toBeUndefined();
+	});
+});
+
+describe("formatThreadDetailBlock includes diffHunk as code block", () => {
+	it("includes diffHunk as a diff code block when present", () => {
+		const status = makeMockStatus({
+			unresolvedThreads: 1,
+			threadDetails: [
+				{
+					id: "PRRT_1",
+						isResolved: false,
+					lastCommentAuthor: "reviewer",
+					lastCommentBody: "Fix the typo",
+					fullBody: "Please fix the typo: authTken should be authToken",
+					path: "src/auth/login.ts",
+					line: 42,
+					allComments: [
+						{
+							id: "RC_1",
+							restApiId: "401",
+							author: "reviewer",
+							body: "Fix the typo",
+							fullBody: "Please fix the typo: authTken should be authToken",
+							path: "src/auth/login.ts",
+							line: 42,
+							diffHunk: "@@ -40,7 +40,7 @@\n export function login() {\n-  const token = getOldToken();\n+  const token = getToken();\n   return token;\n }",
+						},
+					],
+				},
+			],
+		});
+
+		const result = formatAgentNotification(status, config);
+		expect(result).not.toBeNull();
+
+		expect(result!.detailed).toContain("  ```diff");
+		expect(result!.detailed).toContain("  @@ -40,7 +40,7 @@");
+		expect(result!.detailed).toContain("  -  const token = getOldToken();");
+		expect(result!.detailed).toContain("  +  const token = getToken();");
+		expect(result!.detailed).toContain("  ```");
+	});
+
+	it("omits diff code block when diffHunk is absent/undefined", () => {
+		const status = makeMockStatus({
+			unresolvedThreads: 1,
+			threadDetails: [
+				{
+					id: "PRRT_1",
+						isResolved: false,
+					lastCommentAuthor: "reviewer",
+					lastCommentBody: "General review note",
+					fullBody: "General review note with context",
+					path: "src/app.ts",
+					line: 10,
+					allComments: [
+						{
+							id: "RC_1",
+							restApiId: "402",
+							author: "reviewer",
+							body: "General review note",
+							fullBody: "General review note with context",
+							path: "src/app.ts",
+							line: 10,
+							// No diffHunk
+						},
+					],
+				},
+			],
+		});
+
+		const result = formatAgentNotification(status, config);
+		expect(result).not.toBeNull();
+		expect(result!.detailed).not.toContain("```diff");
+	});
+
+	it("handles CRLF line endings in diffHunk", () => {
+		const crlfDiff = "@@ -1,3 +1,3 @@" + "\r\n" + " context line" + "\r\n" + "-old line" + "\r\n" + "+new line";
+		const status = makeMockStatus({
+			unresolvedThreads: 1,
+			threadDetails: [
+				{
+					id: "PRRT_1",
+						isResolved: false,
+					lastCommentAuthor: "reviewer",
+					lastCommentBody: "Fix this",
+					fullBody: "Fix this",
+					path: "src/file.ts",
+					line: 10,
+					allComments: [
+						{
+							id: "RC_1",
+							restApiId: "403",
+							author: "reviewer",
+							body: "Fix this",
+							fullBody: "Fix this",
+							path: "src/file.ts",
+							line: 10,
+							diffHunk: crlfDiff,
+						},
+					],
+				},
+			],
+		});
+
+		const result = formatAgentNotification(status, config);
+		expect(result).not.toBeNull();
+
+		expect(result!.detailed).toContain("  context line");
+		expect(result!.detailed).toContain("  -old line");
+		expect(result!.detailed).toContain("  +new line");
+		expect(result!.detailed).not.toContain("\r");
+	});
+
+	it("truncates long diffHunk to 20 lines with …truncated marker", () => {
+		const longDiff = "@@ -1,25 +1,25 @@\n" + Array.from({ length: 25 }, (_, i) => ` line ${i + 1}`).join("\n");
+		const status = makeMockStatus({
+			unresolvedThreads: 1,
+			threadDetails: [
+				{
+					id: "PRRT_1",
+						isResolved: false,
+					lastCommentAuthor: "reviewer",
+					lastCommentBody: "Fix this",
+					fullBody: "Fix this",
+					path: "src/file.ts",
+					line: 10,
+					allComments: [
+						{
+							id: "RC_1",
+							restApiId: "404",
+							author: "reviewer",
+							body: "Fix this",
+							fullBody: "Fix this",
+							path: "src/file.ts",
+							line: 10,
+							diffHunk: longDiff,
+						},
+					],
+				},
+			],
+		});
+
+		const result = formatAgentNotification(status, config);
+		expect(result).not.toBeNull();
+
+		expect(result!.detailed).toContain("  …truncated");
+		expect(result!.detailed).toContain("  line 19");
+		expect(result!.detailed).not.toContain("  line 20");
+	});
+});
+
+describe("formatAgentNotification includes diff context in detailed output", () => {
+	it("includes diff context for review thread comments", () => {
+		const status = makeMockStatus({
+			unresolvedThreads: 1,
+			threadDetails: [
+				{
+					id: "PRRT_1",
+						isResolved: false,
+					lastCommentAuthor: "reviewer",
+					lastCommentBody: "Typo in variable name",
+					fullBody: "Please fix the typo: authTken should be authToken",
+					path: "src/auth/login.ts",
+					line: 42,
+					allComments: [
+						{
+							id: "PRRC_123",
+							restApiId: "405",
+							author: "reviewer",
+							body: "Typo in variable name",
+							fullBody: "Please fix the typo: authTken should be authToken",
+							path: "src/auth/login.ts",
+							line: 42,
+							diffHunk: "@@ -40,7 +40,7 @@\n export function login() {\n-  const token = getOldToken();\n+  const token = getToken();\n   return token;\n }",
+						},
+					],
+				},
+			],
+		});
+
+		const result = formatAgentNotification(status, config);
+		expect(result).not.toBeNull();
+
+		expect(result!.detailed).toContain("  ```diff");
+		expect(result!.detailed).toContain("  -  const token = getOldToken();");
+		expect(result!.detailed).toContain("  +  const token = getToken();");
+		expect(result!.detailed).toContain("  ```");
+	});
+
+	it("does not include diff context for general comments", () => {
+		const status = makeMockStatus({
+			generalComments: 1,
+			commentDetails: [
+				{
+					id: "C_1",
+					restApiId: "501",
+					author: "bot",
+					body: "Deploy done",
+					fullBody: "Deploy notification: Production deployed",
+					// General comments don't have diffHunk
+				},
+			],
+		});
+
+		const result = formatAgentNotification(status, config);
+		expect(result).not.toBeNull();
+		expect(result!.detailed).toContain("Comment C_1 by bot (restApiId: 501)");
+		expect(result!.detailed).not.toContain("```diff");
+	});
+});
+
+describe("formatAgentStatusUpdate includes diff context for new threads", () => {
+	it("includes diffHunk for new threads", () => {
+		const prev = makeMockStatus({
+			unresolvedThreads: 0,
+			threadDetails: [],
+		});
+		const curr = makeMockStatus({
+			unresolvedThreads: 1,
+			threadDetails: [
+				{
+					id: "PRRT_new",
+						isResolved: false,
+					lastCommentAuthor: "reviewer",
+					lastCommentBody: "New thread",
+					fullBody: "Please review this change",
+					path: "src/index.ts",
+					line: 10,
+					allComments: [
+						{
+							id: "RC_new",
+							restApiId: "406",
+							author: "reviewer",
+							body: "New thread",
+							fullBody: "Please review this change",
+							path: "src/index.ts",
+							line: 10,
+							diffHunk: "@@ -8,3 +8,3 @@\n context line\n-removed line\n+added line",
+						},
+					],
+				},
+			],
+		});
+
+		const result = formatAgentStatusUpdate(prev, curr, config);
+		expect(result.detailed).toContain("  ```diff");
+		expect(result.detailed).toContain("  -removed line");
+		expect(result.detailed).toContain("  +added line");
+	});
+});
