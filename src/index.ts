@@ -615,7 +615,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					return;
 				}
 
-				const curr = snapshotPR(pr);
+				const curr = snapshotPR(pr, currentPreferences.ignoredBots);
 				const { concise: update, detailed: detUpdate } = formatAgentStatusUpdate(mon.lastStatus, curr, config, currentPreferences);
 				const hadChange = update.length > 0;
 				let updateSentThisCycle = false;
@@ -1084,7 +1084,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			"Use action='status' to see all currently monitored PRs.",
 			"Use action='check' to trigger an immediate poll.",
 			"Use action='preferences' to view current preferences or update them with a value parameter.",
-			"The value parameter for preferences is a JSON string with keys: newComments, conflict, ciFailure, reminder, allClear, firstPoll, descriptionStaleness.",
+			"The value parameter for preferences is a JSON string with keys: ignoredBots (array of strings), newComments, conflict, ciFailure, reminder, allClear, firstPoll, descriptionStaleness.",
 			"Template variables available in preferences: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, plus situation-specific vars like {failingChecks}, {unresolvedThreads}, {generalComments}, {conflict}, {commitOid}, {commitShortOid}, {commitUrl}.",
 			"Do NOT stop monitoring on your own. Only the user can stop monitoring via /ghpr-monitor off.",
 			"Monitoring runs until the user stops it via /ghpr-monitor off, or the PR is merged/closed.",

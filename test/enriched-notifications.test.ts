@@ -96,7 +96,7 @@ describe("snapshotPR enriches ThreadSummary and CommentSummary", () => {
 			},
 		});
 
-		const status = snapshotPR(pr);
+		const status = snapshotPR(pr, []);
 		expect(status.unresolvedThreads).toBe(1);
 		expect(status.threadDetails).toHaveLength(1);
 
@@ -132,7 +132,7 @@ describe("snapshotPR enriches ThreadSummary and CommentSummary", () => {
 			},
 		});
 
-		const status = snapshotPR(pr);
+		const status = snapshotPR(pr, []);
 		expect(status.generalComments).toBe(1);
 		expect(status.commentDetails).toHaveLength(1);
 		// Truncated for TUI
@@ -177,7 +177,7 @@ describe("snapshotPR enriches ThreadSummary and CommentSummary", () => {
 			},
 		});
 
-		const status = snapshotPR(pr);
+		const status = snapshotPR(pr, []);
 		const thread = status.threadDetails[0];
 		expect(thread.path).toBe("backend/package.json");
 		expect(thread.line).toBe(39);
@@ -213,7 +213,7 @@ describe("snapshotPR enriches ThreadSummary and CommentSummary", () => {
 			},
 		});
 
-		const status = snapshotPR(pr);
+		const status = snapshotPR(pr, []);
 		expect(status.threadDetails[0].path).toBeUndefined();
 		expect(status.threadDetails[0].line).toBeUndefined();
 	});
@@ -245,7 +245,7 @@ describe("snapshotPR enriches ThreadSummary and CommentSummary", () => {
 			},
 		});
 
-		const status = snapshotPR(pr);
+		const status = snapshotPR(pr, []);
 		const thread = status.threadDetails[0];
 		// TUI body is truncated to 120 chars + ellipsis
 		expect(thread.lastCommentBody).toContain("…");
@@ -865,7 +865,7 @@ describe("snapshotPR maps diffHunk from GraphQL to CommentSummary", () => {
 			},
 		});
 
-		const status = snapshotPR(pr);
+		const status = snapshotPR(pr, []);
 		expect(status.threadDetails).toHaveLength(1);
 		const thread = status.threadDetails[0];
 		expect(thread.allComments).toHaveLength(1);
@@ -896,7 +896,7 @@ describe("snapshotPR maps diffHunk from GraphQL to CommentSummary", () => {
 			},
 		});
 
-		const status = snapshotPR(pr);
+		const status = snapshotPR(pr, []);
 		const thread = status.threadDetails[0];
 		expect(thread.allComments![0].diffHunk).toBeUndefined();
 	});
@@ -917,7 +917,7 @@ describe("snapshotPR maps diffHunk from GraphQL to CommentSummary", () => {
 			},
 		});
 
-		const status = snapshotPR(pr);
+		const status = snapshotPR(pr, []);
 		expect(status.commentDetails).toHaveLength(1);
 		expect((status.commentDetails[0] as any).diffHunk).toBeUndefined();
 	});

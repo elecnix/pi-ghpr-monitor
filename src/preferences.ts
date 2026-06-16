@@ -41,6 +41,12 @@ export const PreferencesSchema = Type.Object(
 					"Prompt override for new review comments / unresolved threads. Variables: {owner}, {repo}, {number}, {host}, {prLabel}, {unresolvedThreads}, {generalComments}",
 			}),
 		),
+		ignoredBots: Type.Optional(
+			Type.Array(Type.String(), {
+				description:
+					"GitHub usernames whose general comments (IssueComment) should be silently ignored. Review thread comments are unaffected.",
+			}),
+		),
 		conflict: Type.Optional(
 			Type.String({
 				description:
@@ -87,6 +93,9 @@ export type Preferences = Static<typeof PreferencesSchema>;
 
 /** Allowed preference keys for validation error messages */
 const ALLOWED_KEYS = new Set(Object.keys(PreferencesSchema.properties));
+
+/** Preference keys that are not string templates (skip template variable validation). */
+const NON_TEMPLATE_KEYS = new Set<string>(["ignoredBots"]);
 
 // ---------------------------------------------------------------------------
 // Default preference templates
@@ -294,7 +303,12 @@ export function validatePreferences(jsonString: string): ValidationResult {
 
 		const parsedObj = parsed as Record<string, unknown>;
 		for (const [key, value] of Object.entries(parsedObj)) {
-			if (value !== undefined && typeof value !== "string") {
+			if (value === undefined) continue;
+			if (key === "ignoredBots") {
+				if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) {
+					errors.push(`Expected array of strings for '${key}', got ${typeof value}`);
+				}
+			} else if (typeof value !== "string") {
 				errors.push(`Expected string or null for '${key}', got ${typeof value}`);
 			}
 		}
@@ -314,7 +328,8 @@ export function validatePreferences(jsonString: string): ValidationResult {
 	const templatelessKeys: string[] = [];
 	const prefs = parsed as Preferences;
 	for (const [key, value] of Object.entries(prefs)) {
-		if (value !== undefined && value !== "" && !TEMPLATE_VAR_RE_NONGLOBAL.test(value)) {
+		if (NON_TEMPLATE_KEYS.has(key)) continue;
+		if (typeof value === "string" && value !== "" && !TEMPLATE_VAR_RE_NONGLOBAL.test(value)) {
 			templatelessKeys.push(key);
 		}
 	}
@@ -393,7 +408,8 @@ export function loadPreferences(): Preferences {
 		const prefs = parsed as Preferences;
 		const templatelessKeys: string[] = [];
 		for (const [key, value] of Object.entries(prefs)) {
-			if (value !== undefined && value !== "" && !TEMPLATE_VAR_RE_NONGLOBAL.test(value)) {
+			if (NON_TEMPLATE_KEYS.has(key)) continue;
+			if (typeof value === "string" && value !== "" && !TEMPLATE_VAR_RE_NONGLOBAL.test(value)) {
 				templatelessKeys.push(key);
 			}
 		}

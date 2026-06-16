@@ -292,7 +292,9 @@ function generalCommentRestApiId(c: CommentNode): string {
 	return c.databaseId != null ? String(c.databaseId) : (c.fullDatabaseId ?? "");
 }
 
-export function snapshotPR(pr: PullRequestData): PRStatus {
+export function snapshotPR(pr: PullRequestData, ignoredBots: string[]): PRStatus {
+	const ignoredBotsSet = ignoredBots.length > 0 ? new Set(ignoredBots) : null;
+
 	const threads = pr.reviewThreads.nodes
 		.filter((t: ReviewThreadNode) => !t.isResolved)
 		.filter((t: ReviewThreadNode) => {
@@ -327,6 +329,7 @@ export function snapshotPR(pr: PullRequestData): PRStatus {
 
 	const comments = pr.comments.nodes
 		.filter((c: CommentNode) => !isAcknowledged(c))
+		.filter((c: CommentNode) => !ignoredBotsSet?.has(c.author?.login ?? ""))
 		.map((c: CommentNode) => ({
 			id: c.id,
 			restApiId: generalCommentRestApiId(c),
@@ -365,7 +368,10 @@ export function snapshotPR(pr: PullRequestData): PRStatus {
 
 	return {
 		unresolvedThreads: countUnresolvedThreads(pr),
-		generalComments: pr.comments.nodes.filter((c: CommentNode) => !isAcknowledged(c)).length,
+		generalComments: pr.comments.nodes
+			.filter((c: CommentNode) => !isAcknowledged(c))
+			.filter((c: CommentNode) => !ignoredBotsSet?.has(c.author?.login ?? ""))
+			.length,
 		hasConflicts: hasConflicts(pr),
 		failingChecks: failingChecks(pr),
 		pendingChecks: pendingChecks(pr),
