@@ -50,6 +50,7 @@ const AWAIT_QUERY = queryMatch[1];
  *   reviewThreads.nodes { ... }                  → PullRequestReviewThread
  *   reviewThreads.nodes.comments.nodes { ... }    → PullRequestReviewComment
  *   commits.nodes { commit { ... } }              → PullRequestCommit, Commit
+ *   commit.author { ... }                         → GitActor
  *   commit.checkSuites.nodes { ... }              → CheckSuite
  *   checkRuns.nodes { ... }                       → CheckRun
  *   commit.status { ... }                         → Status, StatusContext
@@ -63,7 +64,8 @@ const QUERY_FIELDS: Record<string, string[]> = {
 	PullRequestReviewThread: ["id", "isResolved", "comments"],
 	PullRequestReviewComment: ["id", "fullDatabaseId", "body", "author", "createdAt", "path", "line", "diffHunk", "reactions"],
 	PullRequestCommit: ["commit"],
-	Commit: ["oid", "checkSuites", "status"],
+	Commit: ["oid", "messageBody", "author", "checkSuites", "status"],
+	GitActor: ["name", "user"],
 	CheckSuite: ["id", "conclusion", "status", "app", "checkRuns"],
 	CheckRun: ["name", "conclusion", "status"],
 	Status: ["state", "contexts"],

@@ -36,6 +36,33 @@ Status updates include detail the agent needs without re-fetching:
   Add a 👍 reaction to a comment to acknowledge it and stop notifications.
 ```
 
+### New-Commit Notifications
+
+When a new commit is pushed to the PR, the agent is nudged to re-check the PR description. The nudge names **who** pushed the commit and any **co-authors** parsed from the commit's `Co-authored-by:` trailers (on by default):
+
+```
+📝 New commit abc1234 pushed to owner/repo#42 by alice, co-authored by Bob, Carol. Review the PR description to ensure it still accurately reflects the latest changes.
+```
+
+- **`by <author>`** — the commit author's GitHub login, falling back to the git author name. Omitted when the author is unknown.
+- **`, co-authored by <names>`** — co-authors from the commit's `Co-authored-by:` trailers. Omitted when the commit has none (so a commit with no co-authors simply reads `… by alice. Review …`).
+
+You can override this message with the `descriptionStaleness` preference, which supports these template variables:
+
+| Variable           | Description                                          |
+|--------------------|------------------------------------------------------|
+| `{commitShortOid}` | Short 7-character commit SHA                          |
+| `{commitOid}`      | Full commit SHA                                       |
+| `{commitUrl}`      | Link to the commit on GitHub                          |
+| `{commitAuthor}`   | Commit author (GitHub login, or git author name)     |
+| `{commitCoauthors}`| Comma-separated co-author names; empty when none      |
+
+…plus the common `{owner}`, `{repo}`, `{number}`, `{host}`, `{prLabel}`, `{prUrl}`. Set it with:
+
+```
+ghpr-monitor(action="preferences", value='{"descriptionStaleness": "🔁 {commitAuthor} pushed {commitShortOid} to {prLabel} (co-authors: {commitCoauthors})"}')
+```
+
 ### Acknowledging Comments
 
 Comments with a 👍 (thumbs up) reaction are automatically filtered out of notifications. This breaks infinite loops where the agent keeps responding to the same bot comment. The notification includes a hint so the agent knows it can add a 👍 reaction to dismiss a comment.
@@ -111,6 +138,7 @@ The extension uses `gh api graphql` to poll the PR at a configurable interval (d
 - **Failing CI checks** — builds or tests are broken
 - **Pending CI checks** — checks still running
 - **General comments** — including bot comments (filterable via 👍 reaction)
+- **New commits** — a new commit nudges the agent to re-check the PR description, naming the author and any co-authors
 - **PR state** — merged or closed PRs trigger automatic shutdown
 
 When conditions change between polls, it formats a human-readable update and delivers it to the agent via `pi.sendUserMessage()` so it reaches the LLM even on fresh sessions. A concise summary is also shown in the TUI via a custom message renderer registered for the `ghpr-monitor` custom type.

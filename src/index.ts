@@ -84,6 +84,11 @@ const AWAIT_QUERY = `query AwaitPR(
         nodes {
           commit {
             oid
+            messageBody
+            author {
+              name
+              user { login }
+            }
             checkSuites(last: $lastCheckSuites) {
               nodes {
                 id
@@ -694,12 +699,24 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 						const commitOid = curr.lastCommitOid;
 						const commitShortOid = commitOid.slice(0, 7);
 						const commitUrl = `https://${config.host}/${config.owner}/${config.repo}/commit/${commitOid}`;
+						// Author of the new commit (GitHub login, falling back to the git
+						// author name). May be empty if GitHub returns no author info.
+						const commitAuthor = curr.lastCommitAuthor;
+						// Co-authors parsed from the commit's Co-authored-by trailers,
+						// joined with ", ". Empty when the commit has no co-authors.
+						const commitCoauthors = curr.lastCommitCoauthors;
 						// Include the full commit URL in the default message; linkifyPRRefs
 						// converts it into an OSC 8 hyperlink whose visible text is the
 						// short 7-char SHA, so the rendered notification reads e.g.
-						//   📝 New commit abc1234 pushed to v2nic/repo#42. Review ...
-						// where `abc1234` is a clickable link to the commit on GitHub.
-						const defaultStalenessMsg = `\u{1F4DD} New commit ${commitUrl} pushed to ${prLabel}. Review the PR description to ensure it still accurately reflects the latest changes.`;
+						//   📝 New commit abc1234 pushed to v2nic/repo#42 by alice, co-authored by Bob. Review ...
+						// where `abc1234` is a clickable link to the commit on GitHub. The
+						// "by <author>" clause is omitted when the author is unknown, and the
+						// ", co-authored by ..." clause is omitted when there are no co-authors.
+						// A comma form (rather than parentheses) avoids nested parens when a
+						// co-author's name itself contains "(...)".
+						const authorClause = commitAuthor ? ` by ${commitAuthor}` : "";
+						const coauthorClause = commitCoauthors ? `, co-authored by ${commitCoauthors}` : "";
+						const defaultStalenessMsg = `\u{1F4DD} New commit ${commitUrl} pushed to ${prLabel}${authorClause}${coauthorClause}. Review the PR description to ensure it still accurately reflects the latest changes.`;
 						const stalenessMsg = getPreferenceWithDefault(
 							"descriptionStaleness",
 							currentPreferences,
@@ -713,6 +730,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 								commitOid,
 								commitShortOid,
 								commitUrl,
+								commitAuthor,
+								commitCoauthors,
 							},
 							defaultStalenessMsg,
 						);
@@ -1085,7 +1104,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			"Use action='check' to trigger an immediate poll.",
 			"Use action='preferences' to view current preferences or update them with a value parameter.",
 			"The value parameter for preferences is a JSON string with keys: ignoredBots (array of strings), newComments, conflict, ciFailure, reminder, allClear, firstPoll, descriptionStaleness.",
-			"Template variables available in preferences: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, plus situation-specific vars like {failingChecks}, {unresolvedThreads}, {generalComments}, {conflict}, {commitOid}, {commitShortOid}, {commitUrl}.",
+			"Template variables available in preferences: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, plus situation-specific vars like {failingChecks}, {unresolvedThreads}, {generalComments}, {conflict}, {commitOid}, {commitShortOid}, {commitUrl}, {commitAuthor}, {commitCoauthors}.",
 			"Do NOT stop monitoring on your own. Only the user can stop monitoring via /ghpr-monitor off.",
 			"Monitoring runs until the user stops it via /ghpr-monitor off, or the PR is merged/closed.",
 			"You will receive PR status updates as notifications.",
@@ -1306,8 +1325,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					const prefsDisplay = lines.join("\n");
 					const availableKeys = Object.keys(PreferencesSchema.properties).join(", ");
 					const helpText = hasPrefs
-						? `Current preferences:\n${prefsDisplay}\n\nAvailable keys: ${availableKeys}\nTemplate variables: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, {unresolvedThreads}, {generalComments}, {failingChecks}, {conflict}, {commitOid}, {commitShortOid}, {commitUrl}`
-						: `No custom preferences set. Using defaults.\n\nAvailable keys: ${availableKeys}\nTemplate variables: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, {unresolvedThreads}, {generalComments}, {failingChecks}, {conflict}, {commitOid}, {commitShortOid}, {commitUrl}\n\nSet preferences with: ghpr-monitor(action='preferences', value='{"conflict": "⚠️ Conflict on {prLabel}!"}')`;
+						? `Current preferences:\n${prefsDisplay}\n\nAvailable keys: ${availableKeys}\nTemplate variables: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, {unresolvedThreads}, {generalComments}, {failingChecks}, {conflict}, {commitOid}, {commitShortOid}, {commitUrl}, {commitAuthor}, {commitCoauthors}`
+						: `No custom preferences set. Using defaults.\n\nAvailable keys: ${availableKeys}\nTemplate variables: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, {unresolvedThreads}, {generalComments}, {failingChecks}, {conflict}, {commitOid}, {commitShortOid}, {commitUrl}, {commitAuthor}, {commitCoauthors}\n\nSet preferences with: ghpr-monitor(action='preferences', value='{"conflict": "⚠️ Conflict on {prLabel}!"}')`;
 					return {
 						content: [{ type: "text", text: helpText }],
 						details: { action: "preferences", status: "read", preferences: currentPreferences },

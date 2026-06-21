@@ -17,6 +17,7 @@ import {
 	formatActionableItems,
 	formatFooterStatus,
 	snapshotPR,
+	parseCoauthors,
 	linkifyPRRefs,
 	formatAgentNotification,
 } from "../src/analyzer";
@@ -379,7 +380,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		expect(update).toContain("all clear");
@@ -394,7 +395,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		expect(update).toContain("conflict");
@@ -409,7 +410,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		expect(update).toContain("Failing");
@@ -425,7 +426,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		};
 		const curr: PRStatus = {
 			...prev,
@@ -444,7 +445,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: ["ci/build"],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		};
 		const curr: PRStatus = {
 			unresolvedThreads: 0,
@@ -454,7 +455,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		};
 		const update = formatStatusUpdate(prev, curr, config);
 		expect(update).toContain("passed");
@@ -469,7 +470,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		expect(update).toContain("all clear");
@@ -484,7 +485,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		// When prev is null, format uses "N new" format since prev count defaults to 0
@@ -500,7 +501,7 @@ describe("formatStatusUpdate", () => {
 			pendingChecks: ["ci/test", "ci/lint"],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		expect(update).not.toContain("pending");
@@ -526,7 +527,7 @@ describe("formatActionableItems", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		};
 		expect(formatActionableItems(status, config)).toBeNull();
 	});
@@ -540,7 +541,7 @@ describe("formatActionableItems", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		};
 		const result = formatActionableItems(status, config);
 		expect(result).toContain("Merge conflicts detected");
@@ -555,7 +556,7 @@ describe("formatActionableItems", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		};
 		const result = formatActionableItems(status, config);
 		expect(result).toContain("Failing CI checks");
@@ -572,7 +573,7 @@ describe("formatActionableItems", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		};
 		const result = formatActionableItems(status, config);
 		expect(result).toContain("3 unresolved review thread(s)");
@@ -587,7 +588,7 @@ describe("formatActionableItems", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		};
 		const result = formatActionableItems(status, config);
 		expect(result).toContain("2 general comment(s)");
@@ -602,7 +603,7 @@ describe("formatActionableItems", () => {
 			pendingChecks: ["ci/build"],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		};
 		expect(formatActionableItems(status, config)).toBeNull();
 	});
@@ -616,7 +617,7 @@ describe("formatActionableItems", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		};
 		expect(formatActionableItems(status, config)).toBeNull();
 	});
@@ -630,7 +631,7 @@ describe("formatActionableItems", () => {
 			pendingChecks: ["ci/build"],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		};
 		const result = formatActionableItems(status, config);
 		expect(result).toContain("Merge conflicts detected");
@@ -661,7 +662,7 @@ describe("formatStatusUpdate with detail", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 			threadDetails: [
 				{ id: "PRRT_1", isResolved: false, lastCommentAuthor: "reviewer", lastCommentBody: "Please fix this typo" },
 				{ id: "PRRT_2", isResolved: false, lastCommentAuthor: "bot", lastCommentBody: "Build failed" },
@@ -685,7 +686,7 @@ describe("formatStatusUpdate with detail", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 			threadDetails: [],
 			commentDetails: [
 				{ id: "C_1", restApiId: "301", author: "teammate", body: "Can you add tests?" },
@@ -707,7 +708,7 @@ describe("formatStatusUpdate with detail", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 			threadDetails: [],
 			commentDetails: [],
 			checkDetails: [
@@ -729,7 +730,7 @@ describe("formatStatusUpdate with detail", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 			threadDetails: [],
 			commentDetails: [
 				{ id: "C_1", restApiId: "302", author: "user", body: longBody },
@@ -751,7 +752,7 @@ describe("formatStatusUpdate with detail", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 			threadDetails: [],
 			commentDetails: [
 				{ id: "C_1", restApiId: "303", author: "v2nic", body: multilineBody },
@@ -889,7 +890,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
 			failingChecks: [], pendingChecks: [],
 			lastCommentTimestamp: "", lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 			threadDetails: [], commentDetails: [], checkDetails: [],
 		};
 		const result = formatStatusUpdate(null, clean, config);
@@ -901,7 +902,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			unresolvedThreads: 1, generalComments: 0, hasConflicts: false,
 			failingChecks: ["ci/test"], pendingChecks: [],
 			lastCommentTimestamp: "", lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 			threadDetails: [], commentDetails: [],
 			checkDetails: [{ name: "ci/test", conclusion: "FAILURE" }],
 		};
@@ -909,7 +910,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
 			failingChecks: [], pendingChecks: [],
 			lastCommentTimestamp: "", lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 			threadDetails: [], commentDetails: [], checkDetails: [],
 		};
 		const result = formatStatusUpdate(hadIssues, clean, config);
@@ -921,7 +922,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
 			failingChecks: [], pendingChecks: [],
 			lastCommentTimestamp: "", lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 			threadDetails: [], commentDetails: [], checkDetails: [],
 		};
 		const result = formatStatusUpdate(clean, clean, config);
@@ -933,7 +934,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
 			failingChecks: [], pendingChecks: [],
 			lastCommentTimestamp: "", lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 			threadDetails: [], commentDetails: [], checkDetails: [],
 		};
 		const first = formatStatusUpdate(null, clean, config);
@@ -952,7 +953,7 @@ describe("formatFooterStatus", () => {
 		unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
 		failingChecks: [], pendingChecks: [],
 		lastCommentTimestamp: "", lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 		threadDetails: [], commentDetails: [], checkDetails: [],
 	};
 
@@ -1308,6 +1309,115 @@ describe("snapshotPR extracts lastCommitOid", () => {
 	});
 });
 
+describe("snapshotPR extracts lastCommitAuthor", () => {
+	function prWithAuthor(author: CommitNode["commit"]["author"]): PullRequestData {
+		return makeMockPR({
+			commits: {
+				nodes: [
+					{ commit: { oid: "abc123", author, checkSuites: { nodes: [] }, status: null } },
+				],
+			},
+		});
+	}
+
+	it("prefers the GitHub login", () => {
+		const status = snapshotPR(prWithAuthor({ name: "Ada Lovelace", user: { login: "ada" } }), []);
+		expect(status.lastCommitAuthor).toBe("ada");
+	});
+
+	it("falls back to the git author name when no linked user", () => {
+		const status = snapshotPR(prWithAuthor({ name: "Ada Lovelace", user: null }), []);
+		expect(status.lastCommitAuthor).toBe("Ada Lovelace");
+	});
+
+	it("returns empty string when author has neither login nor name", () => {
+		const status = snapshotPR(prWithAuthor({ name: null, user: null }), []);
+		expect(status.lastCommitAuthor).toBe("");
+	});
+
+	it("returns empty string when author is absent", () => {
+		const status = snapshotPR(prWithAuthor(null), []);
+		expect(status.lastCommitAuthor).toBe("");
+	});
+
+	it("returns empty string when there are no commits", () => {
+		const status = snapshotPR(makeMockPR({ commits: { nodes: [] } }), []);
+		expect(status.lastCommitAuthor).toBe("");
+	});
+});
+
+describe("parseCoauthors", () => {
+	it("extracts a single co-author name, stripping the email", () => {
+		expect(parseCoauthors("Title\n\nCo-authored-by: Alice Smith <alice@example.com>")).toEqual([
+			"Alice Smith",
+		]);
+	});
+
+	it("extracts multiple co-authors in order", () => {
+		const msg = "Title\n\nbody\n\nCo-authored-by: Alice <a@x.com>\nCo-authored-by: Bob <b@x.com>";
+		expect(parseCoauthors(msg)).toEqual(["Alice", "Bob"]);
+	});
+
+	it("is case-insensitive on the trailer key", () => {
+		expect(parseCoauthors("co-authored-by: Alice <a@x.com>")).toEqual(["Alice"]);
+		expect(parseCoauthors("CO-AUTHORED-BY: Bob <b@x.com>")).toEqual(["Bob"]);
+	});
+
+	it("de-duplicates repeated co-authors", () => {
+		const msg = "Co-authored-by: Alice <a@x.com>\nCo-authored-by: Alice <a@x.com>";
+		expect(parseCoauthors(msg)).toEqual(["Alice"]);
+	});
+
+	it("keeps the name when there is no email", () => {
+		expect(parseCoauthors("Co-authored-by: Alice")).toEqual(["Alice"]);
+	});
+
+	it("returns [] when there are no co-author trailers", () => {
+		expect(parseCoauthors("feat: a change\n\njust a body")).toEqual([]);
+	});
+
+	it("returns [] for empty, null, or undefined messages", () => {
+		expect(parseCoauthors("")).toEqual([]);
+		expect(parseCoauthors(null)).toEqual([]);
+		expect(parseCoauthors(undefined)).toEqual([]);
+	});
+});
+
+describe("snapshotPR extracts lastCommitCoauthors", () => {
+	function prWithMessage(messageBody: string | null | undefined): PullRequestData {
+		return makeMockPR({
+			commits: {
+				nodes: [
+					{ commit: { oid: "abc123", messageBody, checkSuites: { nodes: [] }, status: null } },
+				],
+			},
+		});
+	}
+
+	it("joins co-authors with ', '", () => {
+		const status = snapshotPR(
+			prWithMessage("Title\n\nCo-authored-by: Alice <a@x.com>\nCo-authored-by: Bob <b@x.com>"),
+			[],
+		);
+		expect(status.lastCommitCoauthors).toBe("Alice, Bob");
+	});
+
+	it("is empty when the commit has no co-authors", () => {
+		const status = snapshotPR(prWithMessage("Title\n\njust a body"), []);
+		expect(status.lastCommitCoauthors).toBe("");
+	});
+
+	it("is empty when the commit has no message body", () => {
+		expect(snapshotPR(prWithMessage(null), []).lastCommitCoauthors).toBe("");
+		expect(snapshotPR(prWithMessage(undefined), []).lastCommitCoauthors).toBe("");
+	});
+
+	it("is empty when there are no commits", () => {
+		const status = snapshotPR(makeMockPR({ commits: { nodes: [] } }), []);
+		expect(status.lastCommitCoauthors).toBe("");
+	});
+});
+
 describe("snapshotPR maps databaseId/fullDatabaseId from GraphQL", () => {
 	it("maps review comment fullDatabaseId to CommentSummary.restApiId", () => {
 		const pr = makeMockPR({
@@ -1410,7 +1520,7 @@ describe("formatThreadDetailBlock", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 			threadDetails: [thread],
 			commentDetails: [],
 			checkDetails: [],
@@ -1439,7 +1549,7 @@ describe("formatCommentDetailBlock includes restApiId", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 			threadDetails: [],
 			commentDetails: [
 				{ id: "IC_1", restApiId: "54321", author: "bot", body: "Deploy done", fullBody: "Deploy notification" },
@@ -1479,7 +1589,7 @@ describe("formatThreadDetails concise", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 			threadDetails: [
 				{ id: "PRRT_abc", isResolved: false, lastCommentAuthor: "reviewer", lastCommentBody: "Fix this" },
 			],
@@ -1499,7 +1609,7 @@ describe("formatThreadDetails concise", () => {
 			pendingChecks: [],
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
-			lastCommitOid: "",
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
 			threadDetails: [],
 			commentDetails: [
 				{ id: "IC_1", restApiId: "54321", author: "bot", body: "Deploy done" },
