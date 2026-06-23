@@ -272,8 +272,11 @@ describe("No rogue pi.sendUserMessage() calls bypass sendPRNotification", () => 
 			const lineText = src.slice(lineStart, idx).trimStart();
 			const isComment = lineText.startsWith("//") || lineText.startsWith("*");
 
+			// Check if it's the PR create hook nudge
+			const isPrCreateNudge = nearby.includes("createPRCreateNudge") || nearby.includes("injecting nudge");
+
 			expect(
-				insideSendPR || isStartSubcommandPrompt || isSteerPrompt || isComment,
+				insideSendPR || isStartSubcommandPrompt || isSteerPrompt || isComment || isPrCreateNudge,
 				`pi.sendUserMessage() at index ${idx} should be inside sendPRNotification(), the !/start prompt, or a steering prompt`
 			).toBe(true);
 		}

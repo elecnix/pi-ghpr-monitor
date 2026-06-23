@@ -379,14 +379,16 @@ describe("loadPreferences / savePreferences", () => {
 // ---------------------------------------------------------------------------
 
 describe("DEFAULT_PREFERENCES", () => {
-	it("has all six preference keys", () => {
-		expect(Object.keys(DEFAULT_PREFERENCES)).toHaveLength(6);
+	it("has all preference keys", () => {
+		expect(Object.keys(DEFAULT_PREFERENCES)).toHaveLength(8);
 		expect(DEFAULT_PREFERENCES).toHaveProperty("newComments");
 		expect(DEFAULT_PREFERENCES).toHaveProperty("conflict");
 		expect(DEFAULT_PREFERENCES).toHaveProperty("ciFailure");
 		expect(DEFAULT_PREFERENCES).toHaveProperty("reminder");
 		expect(DEFAULT_PREFERENCES).toHaveProperty("allClear");
 		expect(DEFAULT_PREFERENCES).toHaveProperty("firstPoll");
+		expect(DEFAULT_PREFERENCES).toHaveProperty("descriptionStaleness");
+		expect(DEFAULT_PREFERENCES).toHaveProperty("prCreateNudge");
 	});
 
 	it("non-undefined defaults contain template variables", () => {

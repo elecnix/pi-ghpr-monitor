@@ -19,6 +19,8 @@
  *   reminder:     {unresolvedThreads}, {generalComments}, {failingChecks}, {conflict}
  *   allClear:     (none extra)
  *   firstPoll:    {intervalSec}
+ *   descriptionStaleness: {commitOid}, {commitShortOid}, {commitUrl}
+ *   prCreateNudge: {prUrl}
  */
 
 import { Type } from "@sinclair/typebox";
@@ -28,6 +30,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { log } from "./logger";
+import { DEFAULT_PR_CREATE_NUDGE } from "./pr-create-hook";
 
 // ---------------------------------------------------------------------------
 // TypeBox schema
@@ -83,6 +86,12 @@ export const PreferencesSchema = Type.Object(
 					"Prompt override for description staleness nudge when new commits are detected. Variables: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, {commitOid}, {commitShortOid}, {commitUrl}, {commitAuthor}, {commitCoauthors}",
 			}),
 		),
+		prCreateNudge: Type.Optional(
+			Type.String({
+				description:
+					"Prompt override for auto-detecting gh pr create output and nudging the LLM to start monitoring. Variables: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}",
+			}),
+		),
 	},
 	{
 		additionalProperties: false,
@@ -113,13 +122,15 @@ const NON_TEMPLATE_KEYS = new Set<string>(["ignoredBots"]);
  * multi-line summary (rather than a single template) use `undefined` here
  * and are labelled "(computed)" in the display.
  */
-export const DEFAULT_PREFERENCES: Record<keyof Preferences, string | undefined> = {
+export const DEFAULT_PREFERENCES: Partial<Record<keyof Preferences, string | undefined>> = {
 	newComments: "💬 {unresolvedThreads} unresolved review thread(s) on {prLabel}",
 	conflict: "⚠️  Merge conflicts detected on {prLabel}",
 	ciFailure: "❌ Failing CI checks on {prLabel}: {failingChecks}",
 	reminder: undefined,
 	allClear: "✨ {prLabel} — no issues, all clear",
 	firstPoll: "📡 Monitoring {owner}/{repo}#{number}... (polling every {intervalSec}s)",
+	descriptionStaleness: undefined,
+	prCreateNudge: DEFAULT_PR_CREATE_NUDGE,
 };
 
 // ---------------------------------------------------------------------------
