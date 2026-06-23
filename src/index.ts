@@ -545,6 +545,14 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		const command = input?.command;
 		if (!command || !isPRCreateCommand(command)) return;
 
+		// Skip failed commands — a failed gh pr create may contain a PR URL
+		// in its error message (e.g. "pull request already exists"), which
+		// would trigger a false-positive nudge.
+		if (event.isError) {
+			log(`PR create hook: gh pr create failed, skipping nudge`);
+			return;
+		}
+
 		// Parse PR URLs from the command output
 		const content = Array.isArray(event.content)
 			? event.content.map((c: { type: string; text: string }) => c.text).join("\n")
