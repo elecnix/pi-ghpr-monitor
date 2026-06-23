@@ -356,7 +356,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	let agentTurnActive = false;
 	let queuedUpdate: { concise: string; detailed: string; host: string; monitorKey: string } | null = null;
 	let queuedForceChecks: Array<{ concise: string; detailed: string; host: string; monitorKey: string }> = [];
-
+	let queuedPrCreateNudges: Array<{ message: string; host: string }> = [];
 	// NOTE: Deduplication is per-monitor (mon.lastSentUpdate). No global lastSentUpdate
 	// to prevent cross-monitor dedup suppression. See issue #25.
 	let uiCtx: ExtensionUIContext | undefined;
@@ -512,6 +512,13 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				mon.lastNudgeTime = Date.now();
 			}
 		}
+		// Flush queued PR create nudges when turn ends
+		if (queuedPrCreateNudges.length > 0) {
+			for (const nudge of queuedPrCreateNudges) {
+				sendPRNotification(nudge.message, nudge.message, {deliverAs: "steer", host: nudge.host});
+			}
+			queuedPrCreateNudges = [];
+		}
 		// Schedule a reminder on next poll for each monitor with actionable items
 		for (const mon of monitors.values()) {
 			if (mon.lastStatus) {
@@ -578,8 +585,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 
 			const nudgeTemplate = currentPreferences.prCreateNudge;
 			const message = createPRCreateNudge(pr, nudgeTemplate);
-			log(`PR create hook: injecting nudge for ${key}`);
-			pi.sendUserMessage(message, { deliverAs: "steer" });
+			log(`PR create hook: queueing nudge for ${key}`);
+			queuedPrCreateNudges.push({ message, host: pr.host });
 		}
 	});
 
