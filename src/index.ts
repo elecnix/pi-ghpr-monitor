@@ -47,6 +47,7 @@ import {
 	getPreferenceWithDefault,
 } from "./preferences";
 import { setSessionId, enableDebug, disableDebug, isDebugEnabled, closeLogger, log, logPRSnapshot, logStatus, getLogPath } from "./logger";
+import { isPRCreateCommand, parsePRUrlsFromOutput, createPRCreateNudge } from "./pr-create-hook";
 
 // ---------------------------------------------------------------------------
 // GraphQL query (same as gh-pr-review's AWAIT_QUERY)
@@ -293,6 +294,8 @@ function createActiveMonitor(config: MonitorConfig): ActiveMonitor {
 
 export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	const monitors: Map<string, ActiveMonitor> = new Map();
+	/** Tracks PR keys that have already been nudged after gh pr create */
+	const nudgedPRKeys: Set<string> = new Set();
 	let agentTurnActive = false;
 	let queuedUpdate: { concise: string; detailed: string; host: string; monitorKey: string } | null = null;
 	let queuedForceChecks: Array<{ concise: string; detailed: string; host: string; monitorKey: string }> = [];
@@ -471,6 +474,47 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		log("Session shutdown event received");
 		stopAllMonitors();
 		closeLogger();
+	});
+
+	// PR create hook: detect when the agent runs gh pr create and
+	// inject a steer message nudging the LLM to start monitoring.
+	pi.on("tool_result", async (event) => {
+		// Only watch bash tool results
+		if (event.toolName !== "bash") return;
+
+		// Get the command string from the tool input
+		const input = event.input as { command?: string } | undefined;
+		const command = input?.command;
+		if (!command || !isPRCreateCommand(command)) return;
+
+		// Parse PR URLs from the command output
+		const content = Array.isArray(event.content)
+			? event.content.map((c: { type: string; text: string }) => c.text).join("\n")
+			: String(event.content ?? "");
+		const prs = parsePRUrlsFromOutput(content);
+		if (prs.length === 0) return;
+
+		// For each newly created PR, send a steer message
+		for (const pr of prs) {
+			const key = prKey(pr.owner, pr.repo, pr.number, pr.host);
+
+			// Skip if already monitoring or already nudged
+			if (monitors.has(key)) {
+				log(`PR create hook: ${key} is already being monitored, skipping nudge`);
+				continue;
+			}
+			if (nudgedPRKeys.has(key)) {
+				log(`PR create hook: ${key} was already nudged this session, skipping`);
+				continue;
+			}
+
+			nudgedPRKeys.add(key);
+
+			const nudgeTemplate = currentPreferences.prCreateNudge;
+			const message = createPRCreateNudge(pr, nudgeTemplate);
+			log(`PR create hook: injecting nudge for ${key}`);
+			pi.sendUserMessage(message, { deliverAs: "steer" });
+		}
 	});
 
 	// -----------------------------------------------------------------------
@@ -1103,7 +1147,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			"Use action='status' to see all currently monitored PRs.",
 			"Use action='check' to trigger an immediate poll.",
 			"Use action='preferences' to view current preferences or update them with a value parameter.",
-			"The value parameter for preferences is a JSON string with keys: ignoredBots (array of strings), newComments, conflict, ciFailure, reminder, allClear, firstPoll, descriptionStaleness.",
+			"The value parameter for preferences is a JSON string with keys: ignoredBots (array of strings), newComments, conflict, ciFailure, reminder, allClear, firstPoll, descriptionStaleness, prCreateNudge.",
 			"Template variables available in preferences: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, plus situation-specific vars like {failingChecks}, {unresolvedThreads}, {generalComments}, {conflict}, {commitOid}, {commitShortOid}, {commitUrl}, {commitAuthor}, {commitCoauthors}.",
 			"Do NOT stop monitoring on your own. Only the user can stop monitoring via /ghpr-monitor off.",
 			"Monitoring runs until the user stops it via /ghpr-monitor off, or the PR is merged/closed.",
