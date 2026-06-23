@@ -1,9 +1,5 @@
 # pi-ghpr-monitor
 
-> [!WARNING]  
-> This repository is now archived. See [elecnix/pi-ghpr-monitor](https://github.com/elecnix/pi-ghpr-monitor) instead.
-
-
 A [Pi](https://github.com/mariozechner/pi-coding-agent) extension that monitors GitHub Pull Requests and injects status updates into your agent session.
 
 ## What It Does
