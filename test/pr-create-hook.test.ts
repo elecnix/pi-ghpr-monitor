@@ -291,18 +291,37 @@ describe("tool_result handler guards isError", () => {
 		"utf-8"
 	);
 
-	it("checks event.isError before calling pi.sendUserMessage", () => {
+	it("checks event.isError before queuing nudge", () => {
 		// Find the tool_result handler section
 		const toolResultIdx = src.indexOf('pi.on("tool_result"');
 		expect(toolResultIdx).toBeGreaterThan(-1);
 
-		// Find sendUserMessage within the handler
-		const sendUserMsgIdx = src.indexOf("pi.sendUserMessage(message,", toolResultIdx);
-		expect(sendUserMsgIdx).toBeGreaterThan(-1);
+		// Find queuedPrCreateNudges.push within the handler
+		const queuePushIdx = src.indexOf("queuedPrCreateNudges.push(", toolResultIdx);
+		expect(queuePushIdx).toBeGreaterThan(-1);
 
-		// Verify isError check appears between handler start and sendUserMessage
-		const between = src.slice(toolResultIdx, sendUserMsgIdx);
+		// Verify isError check appears between handler start and queue push
+		const between = src.slice(toolResultIdx, queuePushIdx);
 		expect(between).toContain("event.isError");
+	});
+
+	it("flushes queued PR create nudges via sendPRNotification in turn_end", () => {
+		// Find the turn_end handler
+		const turnEndIdx = src.indexOf('pi.on("turn_end"');
+		expect(turnEndIdx).toBeGreaterThan(-1);
+
+		// Find the queuedPrCreateNudges flush block within turn_end
+		const flushIdx = src.indexOf("queuedPrCreateNudges.length > 0", turnEndIdx);
+		expect(flushIdx).toBeGreaterThan(-1);
+
+		// Verify sendPRNotification is called within the flush block
+		const sendPRIdx = src.indexOf("sendPRNotification(", flushIdx);
+		expect(sendPRIdx).toBeGreaterThan(-1);
+
+		// Verify the flush block is within the turn_end handler (before end of handler)
+		// Look for the next "})" that ends the turn_end handler
+		const afterFlush = src.slice(flushIdx, flushIdx + 600);
+		expect(afterFlush).toContain("sendPRNotification(nudge.message, nudge.message");
 	});
 
 	it("returns early when isError is true", () => {
