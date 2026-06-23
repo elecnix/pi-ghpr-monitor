@@ -595,26 +595,12 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			return;
 		}
 
-		// Multiple monitors: aggregate summary
-		let issuesCount = 0;
-		let clearCount = 0;
+		// Multiple monitors: one line per PR with clickable links
+		const lines: string[] = [];
 		for (const mon of monitors.values()) {
-			if (mon.lastStatus && (
-				mon.lastStatus.hasConflicts ||
-				mon.lastStatus.unresolvedThreads > 0 ||
-				mon.lastStatus.generalComments > 0 ||
-				mon.lastStatus.failingChecks.length > 0
-			)) {
-				issuesCount++;
-			} else {
-				clearCount++;
-			}
+			lines.push(linkifyPRRefs(formatFooterStatus(mon.config, mon.lastStatus), mon.config.host));
 		}
-
-		const parts: string[] = [];
-		if (issuesCount > 0) parts.push(`${issuesCount} with issues`);
-		if (clearCount > 0) parts.push(`${clearCount} clear`);
-		uiCtx.setStatus("ghpr-monitor", `📡 ${monitors.size} PRs: ${parts.join(", ")}`);
+		uiCtx.setStatus("ghpr-monitor", lines.join("\n"));
 	}
 
 	async function pollLoop(mon: ActiveMonitor): Promise<void> {

@@ -58,10 +58,10 @@ describe("multi-PR monitoring architecture", () => {
 		expect(src).toContain("export function prKey");
 	});
 
-	it("footer aggregates all monitored PRs", () => {
+	it("footer shows one line per PR with clickable links", () => {
 		expect(src).toContain("monitors.size");
-		expect(src).toContain("issuesCount");
-		expect(src).toContain("clearCount");
+		expect(src).toContain("linkifyPRRefs(formatFooterStatus");
+		expect(src).toContain("lines.join");
 	});
 
 	it("pollLoop takes an ActiveMonitor parameter instead of separate config+signal", () => {
