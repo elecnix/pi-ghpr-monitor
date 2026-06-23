@@ -207,10 +207,8 @@ describe("createPRCreateNudge", () => {
 
 	it("generates the default nudge message", () => {
 		const result = createPRCreateNudge(samplePR);
-		expect(result).toContain("v2nic/pi-ghpr-monitor#42");
-		expect(result).toContain("ghpr-monitor");
-		expect(result).toContain("action='start'");
-		expect(result).toContain("https://github.com/v2nic/pi-ghpr-monitor/pull/42");
+		expect(result).toContain("ghpr-monitor(action='start', url='https://github.com/v2nic/pi-ghpr-monitor/pull/42')");
+		expect(result).toContain("Consider monitoring");
 	});
 
 	it("uses custom template when provided", () => {
@@ -238,7 +236,6 @@ describe("createPRCreateNudge", () => {
 			host: "github.corp.com",
 		};
 		const result = createPRCreateNudge(ghePR);
-		expect(result).toContain("team/project#100");
 		expect(result).toContain("https://github.corp.com/team/project/pull/100");
 	});
 });
