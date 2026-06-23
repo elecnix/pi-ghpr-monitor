@@ -202,15 +202,15 @@ describe("Multi-PR architecture structure", () => {
 		expect(stopAllFn).toContain("updateFooter()");
 	});
 
-	it("footer aggregates all monitored PRs", () => {
+	it("footer shows one line per PR with clickable links", () => {
 		const footerFn = src.slice(
 			src.indexOf("function updateFooter()"),
 			src.indexOf("async function pollLoop"),
 		);
 		expect(footerFn).toContain("monitors.size === 0");
 		expect(footerFn).toContain("monitors.size === 1");
-		expect(footerFn).toContain("issuesCount");
-		expect(footerFn).toContain("clearCount");
+		expect(footerFn).toContain("linkifyPRRefs(formatFooterStatus");
+		expect(footerFn).toContain("lines.join");
 		expect(footerFn).toContain("monitors.values()");
 	});
 
@@ -471,10 +471,10 @@ describe("ActiveMonitor state isolation simulation", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Footer aggregation simulation
+// Footer per-line display simulation
 // ---------------------------------------------------------------------------
 
-describe("Footer aggregation simulation", () => {
+describe("Footer per-line display simulation", () => {
 	interface SimStatus {
 		hasConflicts: boolean;
 		unresolvedThreads: number;
@@ -483,39 +483,44 @@ describe("Footer aggregation simulation", () => {
 		pendingChecks: string[];
 	}
 
+	/** Simulates formatFooterStatus for a single monitor. */
+	function formatFooterLine(key: string, status: SimStatus | null): string {
+		const url = `https://github.com/${key.replace("#", "/pull/")}`;
+		if (!status) return `📡 ${url}`;
+		const emojis: string[] = [];
+		if (status.hasConflicts) emojis.push("⚠️");
+		if (status.unresolvedThreads > 0) emojis.push("💬");
+		if (status.generalComments > 0) emojis.push("💭");
+		if (status.failingChecks.length > 0) emojis.push("❌");
+		if (status.pendingChecks.length > 0) emojis.push("⏳");
+		return emojis.length > 0 ? `📡 ${url} ${emojis.join("")}` : `📡 ${url}`;
+	}
+
 	function getFooterLabel(monitors: { key: string; status: SimStatus | null }[]): string {
 		if (monitors.length === 0) return "";
-		if (monitors.length === 1) {
-			const m = monitors[0];
-			const url = `https://github.com/${m.key.replace("#", "/pull/")}`;
-			if (!m.status) return `📡 ${url}`;
-			const emojis: string[] = [];
-			if (m.status.hasConflicts) emojis.push("⚠️");
-			if (m.status.unresolvedThreads > 0) emojis.push("💬");
-			if (m.status.generalComments > 0) emojis.push("💭");
-			if (m.status.failingChecks.length > 0) emojis.push("❌");
-			if (m.status.pendingChecks.length > 0) emojis.push("⏳");
-			return emojis.length > 0 ? `📡 ${url} ${emojis.join("")}` : `📡 ${url}`;
-		}
-		let issuesCount = 0;
-		let clearCount = 0;
-		for (const m of monitors) {
-			if (m.status && (
-				m.status.hasConflicts ||
-				m.status.unresolvedThreads > 0 ||
-				m.status.generalComments > 0 ||
-				m.status.failingChecks.length > 0
-			)) {
-				issuesCount++;
-			} else {
-				clearCount++;
-			}
-		}
-		const parts: string[] = [];
-		if (issuesCount > 0) parts.push(`${issuesCount} with issues`);
-		if (clearCount > 0) parts.push(`${clearCount} clear`);
-		return `📡 ${monitors.length} PRs: ${parts.join(", ")}`;
+		return monitors.map(m => formatFooterLine(m.key, m.status)).join("\n");
 	}
+
+	it("shows one line per PR with its status", () => {
+		const result = getFooterLabel([
+			{ key: "v2nic/repo-a#1", status: { hasConflicts: true, unresolvedThreads: 0, generalComments: 0, failingChecks: [], pendingChecks: [] } },
+			{ key: "v2nic/repo-b#2", status: { hasConflicts: false, unresolvedThreads: 0, generalComments: 0, failingChecks: [], pendingChecks: [] } },
+		]);
+		expect(result).toContain("v2nic/repo-a");
+		expect(result).toContain("v2nic/repo-b");
+		expect(result).toContain("⚠️");
+	});
+
+	it("each PR appears on its own line separated by newline", () => {
+		const result = getFooterLabel([
+			{ key: "v2nic/repo-a#1", status: { hasConflicts: true, unresolvedThreads: 0, generalComments: 0, failingChecks: [], pendingChecks: [] } },
+			{ key: "v2nic/repo-b#2", status: { hasConflicts: false, unresolvedThreads: 0, generalComments: 0, failingChecks: [], pendingChecks: [] } },
+		]);
+		const lines = result.split("\n");
+		expect(lines).toHaveLength(2);
+		expect(lines[0]).toContain("v2nic/repo-a");
+		expect(lines[1]).toContain("v2nic/repo-b");
+	});
 
 	it("shows URL for single monitor with issues", () => {
 		const result = getFooterLabel([{
@@ -545,40 +550,35 @@ describe("Footer aggregation simulation", () => {
 			},
 		}]);
 		expect(result).toContain("v2nic/repo");
+		// Single PR with no issues — no emojis
 		expect(result).not.toContain("with issues");
 	});
 
-	it("shows aggregate for multiple monitors", () => {
-		const result = getFooterLabel([
-			{ key: "v2nic/repo-a#1", status: { hasConflicts: true, unresolvedThreads: 0, generalComments: 0, failingChecks: [], pendingChecks: [] } },
-			{ key: "v2nic/repo-b#2", status: { hasConflicts: false, unresolvedThreads: 0, generalComments: 0, failingChecks: [], pendingChecks: [] } },
-		]);
-		expect(result).toContain("2 PRs");
-		expect(result).toContain("1 with issues");
-		expect(result).toContain("1 clear");
-	});
-
-	it("shows all-clear for multiple monitors with no issues", () => {
-		const result = getFooterLabel([
-			{ key: "v2nic/repo-a#1", status: { hasConflicts: false, unresolvedThreads: 0, generalComments: 0, failingChecks: [], pendingChecks: [] } },
-			{ key: "v2nic/repo-b#2", status: { hasConflicts: false, unresolvedThreads: 0, generalComments: 0, failingChecks: [], pendingChecks: [] } },
-		]);
-		expect(result).toContain("2 PRs");
-		expect(result).toContain("2 clear");
-		expect(result).not.toContain("with issues");
-	});
-
-	it("shows all-with-issues for multiple monitors with all having issues", () => {
+	it("shows multiple PRs with mixed statuses", () => {
 		const result = getFooterLabel([
 			{ key: "v2nic/repo-a#1", status: { hasConflicts: true, unresolvedThreads: 0, generalComments: 0, failingChecks: [], pendingChecks: [] } },
 			{ key: "v2nic/repo-b#2", status: { hasConflicts: false, unresolvedThreads: 3, generalComments: 0, failingChecks: ["ci/test"], pendingChecks: [] } },
+			{ key: "v2nic/repo-c#3", status: { hasConflicts: false, unresolvedThreads: 1, generalComments: 2, failingChecks: [], pendingChecks: [] } },
 		]);
-		expect(result).toContain("2 PRs");
-		expect(result).toContain("2 with issues");
-		expect(result).not.toContain("clear");
+		const lines = result.split("\n");
+		expect(lines).toHaveLength(3);
+		expect(lines[0]).toContain("⚠️");
+		expect(lines[1]).toContain("💬");
+		expect(lines[1]).toContain("❌");
+		expect(lines[2]).toContain("💬");
+		expect(lines[2]).toContain("💭");
 	});
 
-	it("shows pending status as clear (pending is not actionable)", () => {
+	it("does NOT show aggregate counts", () => {
+		const result = getFooterLabel([
+			{ key: "v2nic/repo-a#1", status: { hasConflicts: true, unresolvedThreads: 0, generalComments: 0, failingChecks: [], pendingChecks: [] } },
+			{ key: "v2nic/repo-b#2", status: { hasConflicts: false, unresolvedThreads: 0, generalComments: 0, failingChecks: [], pendingChecks: [] } },
+		]);
+		expect(result).not.toContain("with issues");
+		expect(result).not.toContain("PRs:");
+	});
+
+	it("shows pending status emoji (not considered actionable for issues count)", () => {
 		const result = getFooterLabel([{
 			key: "v2nic/repo#1",
 			status: {
@@ -589,7 +589,6 @@ describe("Footer aggregation simulation", () => {
 				pendingChecks: ["ci/build"],
 			},
 		}]);
-		// Pending checks alone is not actionable — counted as "clear"
 		expect(result).toContain("v2nic/repo");
 		expect(result).toContain("⏳");
 	});
