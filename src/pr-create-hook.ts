@@ -81,7 +81,7 @@ export function parsePRUrlsFromOutput(output: string): ParsedPR[] {
 
 /** Default nudge template */
 export const DEFAULT_PR_CREATE_NUDGE =
-	"💡 Consider monitoring with ghpr-monitor(action='start', url='{prUrl}') to track review comments, merge conflicts, and CI status.";
+	"📡 Monitor this PR with ghpr-monitor(action='start', url='{prUrl}') to track review comments, merge conflicts, and CI status.";
 
 /**
  * Available template variables for the prCreateNudge preference:
