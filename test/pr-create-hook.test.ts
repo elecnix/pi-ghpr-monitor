@@ -208,7 +208,7 @@ describe("createPRCreateNudge", () => {
 	it("generates the default nudge message", () => {
 		const result = createPRCreateNudge(samplePR);
 		expect(result).toContain("ghpr-monitor(action='start', url='https://github.com/v2nic/pi-ghpr-monitor/pull/42')");
-		expect(result).toContain("Consider monitoring");
+		expect(result).toContain("Monitor this PR");
 	});
 
 	it("uses custom template when provided", () => {
