@@ -136,8 +136,8 @@ describe("forceNotify fix", () => {
 			src.indexOf("if (mon.forceNotify) {"),
 			src.indexOf("Periodic nudge"),
 		);
-		expect(block).toContain("formatActionableItems(curr, config, currentPreferences)");
-		expect(block).toContain("formatAgentNotification(curr, config, currentPreferences)");
+		expect(block).toContain("formatActionableItems(curr, config, currentPreferences, prevForCheck)");
+		expect(block).toContain("formatAgentNotification(curr, config, currentPreferences, prevForCheck)");
 		expect(block).toContain("sendPRNotification");
 		expect(block).toContain("queuedForceCheck");
 	});

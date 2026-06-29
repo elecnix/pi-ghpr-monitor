@@ -151,7 +151,7 @@ describe("All notification paths use sendPRNotification for agent delivery", () 
 		const forceCheckIdx = src.indexOf("if (mon.forceNotify)");
 		expect(forceCheckIdx).toBeGreaterThan(-1);
 
-		const nearby = src.slice(forceCheckIdx, forceCheckIdx + 800);
+		const nearby = src.slice(forceCheckIdx, forceCheckIdx + 1000);
 		expect(nearby).toContain("sendPRNotification(");
 	});
 
@@ -159,7 +159,7 @@ describe("All notification paths use sendPRNotification for agent delivery", () 
 		const nudgeIdx = src.indexOf("Periodic nudge");
 		expect(nudgeIdx).toBeGreaterThan(-1);
 
-		const nearby = src.slice(nudgeIdx, Math.min(nudgeIdx + 500, src.length));
+		const nearby = src.slice(nudgeIdx, Math.min(nudgeIdx + 800, src.length));
 		expect(nearby).toContain("sendPRNotification(");
 	});
 

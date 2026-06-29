@@ -38,6 +38,7 @@ import {
 	type Preferences,
 	PreferencesSchema,
 	DEFAULT_PREFERENCES,
+	DEFAULT_RETRIGGER_COMMENTS,
 	validatePreferences,
 	loadPreferences,
 	savePreferences,
@@ -673,9 +674,11 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				// — but skip if a status update was already sent this cycle to avoid
 				//   duplicate content (e.g. first-poll overlap when lastStatus is null)
 				if (!updateSentThisCycle && mon.needsReminder && !agentTurnActive) {
-					const reminder = formatActionableItems(curr, config, currentPreferences);
+					const retrigger = currentPreferences.retriggerComments ?? DEFAULT_RETRIGGER_COMMENTS;
+					const prevForReminder = !retrigger ? mon.lastStatus ?? undefined : undefined;
+					const reminder = formatActionableItems(curr, config, currentPreferences, prevForReminder);
 					if (reminder && reminder !== mon.lastSentReminder) {
-						const detReminder = formatAgentNotification(curr, config, currentPreferences); sendPRNotification(reminder, detReminder?.detailed ?? reminder, {deliverAs: "steer", host: config.host});
+						const detReminder = formatAgentNotification(curr, config, currentPreferences, prevForReminder); sendPRNotification(reminder, detReminder?.detailed ?? reminder, {deliverAs: "steer", host: config.host});
 						mon.lastSentReminder = reminder;
 						mon.lastNudgeTime = Date.now();
 					}
@@ -688,8 +691,10 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					// IMPORTANT: Use prLabel (owner/repo#number) in notification text, NOT prUrl.
 					// See the merged/closed notification above for why.
 					const prLabel = `${config.owner}/${config.repo}#${config.number}`;
-					const items = formatActionableItems(curr, config, currentPreferences);
-					const detItems = formatAgentNotification(curr, config, currentPreferences);
+					const retrigger = currentPreferences.retriggerComments ?? DEFAULT_RETRIGGER_COMMENTS;
+					const prevForCheck = !retrigger ? mon.lastStatus ?? undefined : undefined;
+					const items = formatActionableItems(curr, config, currentPreferences, prevForCheck);
+					const detItems = formatAgentNotification(curr, config, currentPreferences, prevForCheck);
 					const msg = items ?? `\u2705 No issues found on ${prLabel}`;
 					const detMsg = detItems?.detailed ?? `\u2705 No issues found on ${prLabel}`;
 					if (agentTurnActive) {
@@ -709,8 +714,10 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					mon.lastNudgeTime > 0 &&
 					Date.now() - mon.lastNudgeTime >= NUDGE_COOLDOWN_MS
 				) {
-					const nudge = formatActionableItems(curr, config, currentPreferences);
-					const detNudge = formatAgentNotification(curr, config, currentPreferences);
+					const retrigger = currentPreferences.retriggerComments ?? DEFAULT_RETRIGGER_COMMENTS;
+					const prevForNudge = !retrigger ? mon.lastStatus ?? undefined : undefined;
+					const nudge = formatActionableItems(curr, config, currentPreferences, prevForNudge);
+					const detNudge = formatAgentNotification(curr, config, currentPreferences, prevForNudge);
 					if (nudge) {
 						sendPRNotification(nudge, detNudge?.detailed ?? nudge, {deliverAs: "steer", host: config.host});
 						mon.lastSentReminder = nudge;
@@ -1133,7 +1140,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			"Use action='status' to see all currently monitored PRs.",
 			"Use action='check' to trigger an immediate poll.",
 			"Use action='preferences' to view current preferences or update them with a value parameter.",
-			"The value parameter for preferences is a JSON string with keys: ignoredBots (array of strings), newComments, conflict, ciFailure, reminder, allClear, firstPoll, descriptionStaleness, prCreateNudge.",
+			"The value parameter for preferences is a JSON string with keys: ignoredBots (array of strings), newComments, conflict, ciFailure, reminder, allClear, firstPoll, descriptionStaleness, prCreateNudge, retriggerComments (boolean, default false).",
 			"Template variables available in preferences: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, plus situation-specific vars like {failingChecks}, {unresolvedThreads}, {generalComments}, {conflict}, {commitOid}, {commitShortOid}, {commitUrl}, {commitAuthor}, {commitCoauthors}.",
 			"Do NOT stop monitoring on your own. Only the user can stop monitoring via /ghpr-monitor off.",
 			"Monitoring runs until the user stops it via /ghpr-monitor off, or the PR is merged/closed.",
@@ -1354,7 +1361,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					}
 					const prefsDisplay = lines.join("\n");
 					const availableKeys = Object.keys(PreferencesSchema.properties).join(", ");
-					const helpText = hasPrefs
+					const hasCustomPrefs = Object.keys(currentPreferences).length > 0;
+					const helpText = hasCustomPrefs
 						? `Current preferences:\n${prefsDisplay}\n\nAvailable keys: ${availableKeys}\nTemplate variables: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, {unresolvedThreads}, {generalComments}, {failingChecks}, {conflict}, {commitOid}, {commitShortOid}, {commitUrl}, {commitAuthor}, {commitCoauthors}`
 						: `No custom preferences set. Using defaults.\n\nAvailable keys: ${availableKeys}\nTemplate variables: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, {unresolvedThreads}, {generalComments}, {failingChecks}, {conflict}, {commitOid}, {commitShortOid}, {commitUrl}, {commitAuthor}, {commitCoauthors}\n\nSet preferences with: ghpr-monitor(action='preferences', value='{"conflict": "⚠️ Conflict on {prLabel}!"}')`;
 					return {

@@ -607,14 +607,42 @@ function formatCommentDetails(comments: CommentSummary[], prev?: CommentSummary[
  * {unresolvedThreads} and {generalComments} available, covering both
  * threads and comments in a single line.
  */
-export function formatActionableItems(status: PRStatus, config: MonitorConfig, prefs?: Preferences): string | null {
+export function formatActionableItems(status: PRStatus, config: MonitorConfig, prefs?: Preferences, prev?: PRStatus): string | null {
 	const prLabel = `${config.owner}/${config.repo}#${config.number}`;
 
-	// If the reminder preference is set, use it as the entire concise message
+	// Determine new threads and comments when prev is provided (retriggerComments dedup mode)
+	const prevThreadIds = prev ? new Set((prev.threadDetails ?? []).map(t => t.id)) : null;
+	const prevCommentIds = prev ? new Set((prev.commentDetails ?? []).map(c => c.id)) : null;
+
+	// Filter thread details to only new threads when prev is provided
+	const effectiveThreads = prev
+		? (status.threadDetails ?? []).filter(t => !prevThreadIds!.has(t.id))
+		: (status.threadDetails ?? []);
+	const effectiveUnresolved = prev ? effectiveThreads.length : status.unresolvedThreads;
+
+	// Filter comment details to only new comments when prev is provided
+	const effectiveComments = prev
+		? (status.commentDetails ?? []).filter(c => !prevCommentIds!.has(c.id))
+		: (status.commentDetails ?? []);
+	const effectiveCommentCount = prev ? effectiveComments.length : status.generalComments;
+
+	// If the reminder preference is set, use it as the entire concise message.
+	// When retriggerComments dedup is active (prev provided), only emit the reminder
+	// if there are actually new items worth reporting.
 	if (prefs?.reminder) {
+		const hasNewItems = !prev ||
+			effectiveUnresolved > 0 ||
+			effectiveCommentCount > 0 ||
+			status.hasConflicts ||
+			status.failingChecks.length > 0 ||
+			(prev && (
+				status.hasConflicts !== prev.hasConflicts ||
+				status.failingChecks.join(",") !== prev.failingChecks.join(",")
+			));
+		if (!hasNewItems) return null;
 		const reminder = interpolateTemplate(prefs.reminder, makeTemplateVars(config, {
-			unresolvedThreads: status.unresolvedThreads,
-			generalComments: status.generalComments,
+			unresolvedThreads: effectiveUnresolved,
+			generalComments: effectiveCommentCount,
 			failingChecks: status.failingChecks.join(", "),
 			conflict: status.hasConflicts,
 		}));
@@ -645,17 +673,20 @@ export function formatActionableItems(status: PRStatus, config: MonitorConfig, p
 	// newComments preference: emit once with both variables, covering threads + comments
 	let newCommentsPrefEmitted = false;
 
-	if (status.unresolvedThreads > 0) {
+	if (effectiveUnresolved > 0) {
 		if (prefs?.newComments && !newCommentsPrefEmitted) {
 			lines.push(interpolateTemplate(prefs.newComments, makeTemplateVars(config, {
-				unresolvedThreads: status.unresolvedThreads,
-				generalComments: status.generalComments,
+				unresolvedThreads: effectiveUnresolved,
+				generalComments: effectiveCommentCount,
 			})));
 			newCommentsPrefEmitted = true;
 		} else if (!prefs?.newComments) {
-			lines.push(`💬 ${status.unresolvedThreads} unresolved review thread(s) on ${prLabel}:`);
+			const threadLabel = prev && effectiveUnresolved < status.unresolvedThreads
+				? `${effectiveUnresolved} new review thread(s) on ${prLabel} (${status.unresolvedThreads} total):`
+				: `💬 ${effectiveUnresolved} unresolved review thread(s) on ${prLabel}:`;
+			lines.push(threadLabel);
 		}
-		const threadLines = formatThreadDetails(status.threadDetails ?? []);
+		const threadLines = formatThreadDetails(effectiveThreads);
 		if (threadLines) {
 			lines.push(threadLines);
 			lines.push("  After replying, resolve each thread: gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\"<id>\"}){thread{isResolved}}}'");
@@ -663,17 +694,20 @@ export function formatActionableItems(status: PRStatus, config: MonitorConfig, p
 		}
 	}
 
-	if (status.generalComments > 0) {
+	if (effectiveCommentCount > 0) {
 		if (prefs?.newComments && !newCommentsPrefEmitted) {
 			lines.push(interpolateTemplate(prefs.newComments, makeTemplateVars(config, {
-				unresolvedThreads: status.unresolvedThreads,
-				generalComments: status.generalComments,
+				unresolvedThreads: effectiveUnresolved,
+				generalComments: effectiveCommentCount,
 			})));
 			newCommentsPrefEmitted = true;
 		} else if (!prefs?.newComments) {
-			lines.push(`💭 ${status.generalComments} general comment(s) on ${prLabel}:`);
+			const commentLabel = prev && effectiveCommentCount < status.generalComments
+				? `${effectiveCommentCount} new general comment(s) on ${prLabel}:`
+				: `💭 ${effectiveCommentCount} general comment(s) on ${prLabel}:`;
+			lines.push(commentLabel);
 		}
-		const commentLines = formatCommentDetails(status.commentDetails ?? []);
+		const commentLines = formatCommentDetails(effectiveComments);
 		if (commentLines) {
 			lines.push(commentLines);
 			lines.push("  React with 👍 on a comment to acknowledge it and stop notifications.");
@@ -991,8 +1025,8 @@ function formatCommentDetailBlock(comment: CommentSummary): string {
  *   - concise: the short TUI-friendly summary (same as formatActionableItems)
  *   - detailed: the full agent-facing content including structured details
  */
-export function formatAgentNotification(status: PRStatus, config: MonitorConfig, prefs?: Preferences): { concise: string; detailed: string } | null {
-	const concise = formatActionableItems(status, config, prefs);
+export function formatAgentNotification(status: PRStatus, config: MonitorConfig, prefs?: Preferences, prev?: PRStatus): { concise: string; detailed: string } | null {
+	const concise = formatActionableItems(status, config, prefs, prev);
 	if (concise === null) return null;
 
 	const detailLines: string[] = [];
