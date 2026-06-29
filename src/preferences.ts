@@ -114,10 +114,12 @@ export const DEFAULT_RETRIGGER_COMMENTS = false;
 const ALLOWED_KEYS = new Set(Object.keys(PreferencesSchema.properties));
 
 /** Preference keys that are not string templates (skip template variable validation). */
-const NON_TEMPLATE_KEYS = new Set<string>(["ignoredBots", "retriggerComments"]);
+const NON_TEMPLATE_KEY_VALUES = ["ignoredBots", "retriggerComments"] as const;
+/** Runtime set for .has() lookups. */
+const NON_TEMPLATE_KEYS = new Set<string>(NON_TEMPLATE_KEY_VALUES);
 
-/** Type union of non-template preference keys — single source of truth. */
-type NonTemplateKey = "ignoredBots" | "retriggerComments";
+/** Type union of non-template preference keys — derived from the canonical array. */
+type NonTemplateKey = (typeof NON_TEMPLATE_KEY_VALUES)[number];
 
 // ---------------------------------------------------------------------------
 // Default preference templates

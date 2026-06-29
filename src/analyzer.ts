@@ -625,14 +625,8 @@ export function formatActionableItems(status: PRStatus, config: MonitorConfig, p
 		]))
 		: null;
 
-	const isNewThread = (t: { id: string; allComments?: { id: string }[] }) => {
-		if (!prevThreadIds!.has(t.id)) return true; // brand-new thread
-		const prevCids = prevThreadCommentIds!.get(t.id);
-		if (!prevCids) return true; // shouldn't happen, but safe
-		// True if any comment ID in the current thread was not in prev
-		const currCids = new Set((t.allComments ?? []).map(c => c.id));
-		return [...currCids].some(id => !prevCids.has(id));
-	};
+	const isNewThread = (t: { id: string; allComments?: { id: string }[] }) =>
+		isThreadNew(t, prevThreadIds!, prevThreadCommentIds!);
 
 	// Filter thread details to only new threads when prev is provided
 	const effectiveThreads = prev
@@ -1040,6 +1034,23 @@ function formatCommentDetailBlock(comment: CommentSummary): string {
 }
 
 /**
+ * Thread dedup helper — returns true when a thread has content not yet seen
+ * in a previous snapshot. A thread is "new" when it didn't exist in prev at
+ * all, or when any of its current comment IDs were not in prev.
+ */
+function isThreadNew(
+	thread: { id: string; allComments?: { id: string }[] },
+	prevThreadIds: Set<string>,
+	prevThreadCommentIds: Map<string, Set<string>>,
+): boolean {
+	if (!prevThreadIds.has(thread.id)) return true;
+	const prevCids = prevThreadCommentIds.get(thread.id);
+	if (!prevCids) return true;
+	const currCids = new Set((thread.allComments ?? []).map(c => c.id));
+	return [...currCids].some(id => !prevCids.has(id));
+}
+
+/**
  * Format an enriched notification for the agent, including full comment bodies,
  * file paths, and line numbers so the LLM can act without additional API calls.
  *
@@ -1071,11 +1082,7 @@ export function formatAgentNotification(status: PRStatus, config: MonitorConfig,
 		.filter(t => !t.isResolved)
 		.filter(t => {
 			if (!prevThreadIds) return true;
-			if (!prevThreadIds.has(t.id)) return true;
-			const prevCids = prevThreadCommentIds!.get(t.id);
-			if (!prevCids) return true;
-			const currCids = new Set((t.allComments ?? []).map(c => c.id));
-			return [...currCids].some(id => !prevCids.has(id));
+			return isThreadNew(t, prevThreadIds, prevThreadCommentIds!);
 		});
 	if (threadsWithDetails.length > 0) {
 		detailLines.push("");
