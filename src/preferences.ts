@@ -116,6 +116,9 @@ const ALLOWED_KEYS = new Set(Object.keys(PreferencesSchema.properties));
 /** Preference keys that are not string templates (skip template variable validation). */
 const NON_TEMPLATE_KEYS = new Set<string>(["ignoredBots", "retriggerComments"]);
 
+/** Type union of non-template preference keys — single source of truth. */
+type NonTemplateKey = "ignoredBots" | "retriggerComments";
+
 // ---------------------------------------------------------------------------
 // Default preference templates
 //
@@ -141,7 +144,6 @@ export const DEFAULT_PREFERENCES: Partial<Record<keyof Preferences, string | und
 	firstPoll: "📡 Monitoring {owner}/{repo}#{number}... (polling every {intervalSec}s)",
 	descriptionStaleness: undefined,
 	prCreateNudge: DEFAULT_PR_CREATE_NUDGE,
-	retriggerComments: undefined, // boolean default, see DEFAULT_RETRIGGER_COMMENTS
 };
 
 // ---------------------------------------------------------------------------
@@ -396,9 +398,6 @@ export function getEffectivePreferences(prefs: Preferences): Partial<Record<keyo
 	const result: Partial<Record<keyof Preferences, string>> = {};
 	for (const key of Object.keys(DEFAULT_PREFERENCES) as (keyof Preferences)[]) {
 		const override = prefs[key];
-		// Skip boolean/non-string keys (e.g. retriggerComments) —
-		// they are handled at the call site, not via template interpolation.
-		if (NON_TEMPLATE_KEYS.has(key)) continue;
 		if (override !== undefined && override !== "") {
 			result[key] = override as string;
 		} else if (DEFAULT_PREFERENCES[key] !== undefined) {
@@ -493,7 +492,7 @@ export function getPreferencesPath(): string {
  * template variables. If not set, return the default value.
  */
 export function getPreferenceWithDefault(
-	key: Exclude<keyof Preferences, "ignoredBots" | "retriggerComments">,
+	key: Exclude<keyof Preferences, NonTemplateKey>,
 	prefs: Preferences,
 	vars: TemplateVars,
 	defaultValue: string,

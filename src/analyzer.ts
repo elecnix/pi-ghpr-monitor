@@ -610,13 +610,33 @@ function formatCommentDetails(comments: CommentSummary[], prev?: CommentSummary[
 export function formatActionableItems(status: PRStatus, config: MonitorConfig, prefs?: Preferences, prev?: PRStatus): string | null {
 	const prLabel = `${config.owner}/${config.repo}#${config.number}`;
 
-	// Determine new threads and comments when prev is provided (retriggerComments dedup mode)
+	// Determine new threads and comments when prev is provided (retriggerComments dedup mode).
+	// Threads are deduped by id AND content: a thread is considered "new" only when
+	// it was not in prev at all, OR when it gained new comment IDs since prev.
+	// General comments are deduped by id alone (a new id always means a new comment).
 	const prevThreadIds = prev ? new Set((prev.threadDetails ?? []).map(t => t.id)) : null;
 	const prevCommentIds = prev ? new Set((prev.commentDetails ?? []).map(c => c.id)) : null;
+	// Per-thread comment-ID sets from the previous snapshot (keyed by thread id).
+	// Used to detect new replies on already-seen threads.
+	const prevThreadCommentIds = prev
+		? new Map((prev.threadDetails ?? []).map(t => [
+			t.id,
+			new Set((t.allComments ?? []).map(c => c.id)),
+		]))
+		: null;
+
+	const isNewThread = (t: { id: string; allComments?: { id: string }[] }) => {
+		if (!prevThreadIds!.has(t.id)) return true; // brand-new thread
+		const prevCids = prevThreadCommentIds!.get(t.id);
+		if (!prevCids) return true; // shouldn't happen, but safe
+		// True if any comment ID in the current thread was not in prev
+		const currCids = new Set((t.allComments ?? []).map(c => c.id));
+		return [...currCids].some(id => !prevCids.has(id));
+	};
 
 	// Filter thread details to only new threads when prev is provided
 	const effectiveThreads = prev
-		? (status.threadDetails ?? []).filter(t => !prevThreadIds!.has(t.id))
+		? (status.threadDetails ?? []).filter(isNewThread)
 		: (status.threadDetails ?? []);
 	const effectiveUnresolved = prev ? effectiveThreads.length : status.unresolvedThreads;
 
@@ -628,7 +648,9 @@ export function formatActionableItems(status: PRStatus, config: MonitorConfig, p
 
 	// If the reminder preference is set, use it as the entire concise message.
 	// When retriggerComments dedup is active (prev provided), only emit the reminder
-	// if there are actually new items worth reporting.
+	// if there are actually new items worth reporting. Template variables always use
+	// the full current counts (status.*) — not the filtered effective counts — so a
+	// reminder firing because of a new CI failure still accurately reports open threads.
 	if (prefs?.reminder) {
 		const hasNewItems = !prev ||
 			effectiveUnresolved > 0 ||
@@ -641,8 +663,8 @@ export function formatActionableItems(status: PRStatus, config: MonitorConfig, p
 			));
 		if (!hasNewItems) return null;
 		const reminder = interpolateTemplate(prefs.reminder, makeTemplateVars(config, {
-			unresolvedThreads: effectiveUnresolved,
-			generalComments: effectiveCommentCount,
+			unresolvedThreads: status.unresolvedThreads,
+			generalComments: status.generalComments,
 			failingChecks: status.failingChecks.join(", "),
 			conflict: status.hasConflicts,
 		}));
@@ -1031,8 +1053,30 @@ export function formatAgentNotification(status: PRStatus, config: MonitorConfig,
 
 	const detailLines: string[] = [];
 
-	// Thread detail blocks
-	const threadsWithDetails = (status.threadDetails ?? []).filter(t => !t.isResolved);
+	// When prev is provided, only include detail blocks for items that are
+	// new since the last notification — matching the concise dedup logic.
+	// Threads are considered new when their comment-ID set changed.
+	// General comments are new when their id is new.
+	const prevThreadIds = prev ? new Set((prev.threadDetails ?? []).map(t => t.id)) : null;
+	const prevCommentIds = prev ? new Set((prev.commentDetails ?? []).map(c => c.id)) : null;
+	const prevThreadCommentIds = prev
+		? new Map((prev.threadDetails ?? []).map(t => [
+			t.id,
+			new Set((t.allComments ?? []).map(c => c.id)),
+		]))
+		: null;
+
+	// Thread detail blocks — filter to threads with new content when prev is provided
+	const threadsWithDetails = (status.threadDetails ?? [])
+		.filter(t => !t.isResolved)
+		.filter(t => {
+			if (!prevThreadIds) return true;
+			if (!prevThreadIds.has(t.id)) return true;
+			const prevCids = prevThreadCommentIds!.get(t.id);
+			if (!prevCids) return true;
+			const currCids = new Set((t.allComments ?? []).map(c => c.id));
+			return [...currCids].some(id => !prevCids.has(id));
+		});
 	if (threadsWithDetails.length > 0) {
 		detailLines.push("");
 		detailLines.push("Review thread details:");
@@ -1041,8 +1085,9 @@ export function formatAgentNotification(status: PRStatus, config: MonitorConfig,
 		}
 	}
 
-	// General comment detail blocks
-	const commentsWithDetails = status.commentDetails ?? [];
+	// General comment detail blocks — only new comments when prev is provided
+	const commentsWithDetails = (status.commentDetails ?? [])
+		.filter(c => !prevCommentIds || !prevCommentIds.has(c.id));
 	if (commentsWithDetails.length > 0) {
 		detailLines.push("");
 		detailLines.push("General comment details:");

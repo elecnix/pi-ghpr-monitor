@@ -381,7 +381,7 @@ describe("loadPreferences / savePreferences", () => {
 
 describe("DEFAULT_PREFERENCES", () => {
 	it("has all preference keys", () => {
-		expect(Object.keys(DEFAULT_PREFERENCES)).toHaveLength(9);
+		expect(Object.keys(DEFAULT_PREFERENCES)).toHaveLength(8);
 		expect(DEFAULT_PREFERENCES).toHaveProperty("newComments");
 		expect(DEFAULT_PREFERENCES).toHaveProperty("conflict");
 		expect(DEFAULT_PREFERENCES).toHaveProperty("ciFailure");
@@ -390,7 +390,7 @@ describe("DEFAULT_PREFERENCES", () => {
 		expect(DEFAULT_PREFERENCES).toHaveProperty("firstPoll");
 		expect(DEFAULT_PREFERENCES).toHaveProperty("descriptionStaleness");
 		expect(DEFAULT_PREFERENCES).toHaveProperty("prCreateNudge");
-		expect(DEFAULT_PREFERENCES).toHaveProperty("retriggerComments");
+		expect(DEFAULT_PREFERENCES).not.toHaveProperty("retriggerComments");
 	});
 
 	it("non-undefined defaults contain template variables", () => {
@@ -808,15 +808,15 @@ describe("retriggerComments preference (prev filtering)", () => {
 		const prev = makeStatus({
 			unresolvedThreads: 2,
 			threadDetails: [
-				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this" },
-				{ id: "t2", isResolved: false, lastCommentAuthor: "bob", lastCommentBody: "also this" },
+				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix this" }] },
+				{ id: "t2", isResolved: false, lastCommentAuthor: "bob", lastCommentBody: "also this", allComments: [{ id: "c2", author: "bob", restApiId: "2", body: "also this" }] },
 			],
 		});
 		const curr = makeStatus({
 			unresolvedThreads: 2,
 			threadDetails: [
-				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this" },
-				{ id: "t2", isResolved: false, lastCommentAuthor: "bob", lastCommentBody: "also this" },
+				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix this" }] },
+				{ id: "t2", isResolved: false, lastCommentAuthor: "bob", lastCommentBody: "also this", allComments: [{ id: "c2", author: "bob", restApiId: "2", body: "also this" }] },
 			],
 		});
 
@@ -834,14 +834,14 @@ describe("retriggerComments preference (prev filtering)", () => {
 		const prev = makeStatus({
 			unresolvedThreads: 1,
 			threadDetails: [
-				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this" },
+				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix this" }] },
 			],
 		});
 		const curr = makeStatus({
 			unresolvedThreads: 2,
 			threadDetails: [
-				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this" },
-				{ id: "t2", isResolved: false, lastCommentAuthor: "bob", lastCommentBody: "new thing" },
+				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix this" }] },
+				{ id: "t2", isResolved: false, lastCommentAuthor: "bob", lastCommentBody: "new thing", allComments: [{ id: "c2b", author: "bob", restApiId: "2", body: "new thing" }] },
 			],
 		});
 
@@ -947,13 +947,13 @@ describe("retriggerComments preference (prev filtering)", () => {
 		const prev = makeStatus({
 			unresolvedThreads: 1,
 			threadDetails: [
-				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this" },
+				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix this" }] },
 			],
 		});
 		const curr = makeStatus({
 			unresolvedThreads: 1,
 			threadDetails: [
-				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this" },
+				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix this" }] },
 			],
 		});
 
@@ -971,7 +971,7 @@ describe("retriggerComments preference (prev filtering)", () => {
 		const curr = makeStatus({
 			unresolvedThreads: 1,
 			threadDetails: [
-				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this" },
+				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix this" }] },
 			],
 		});
 
@@ -994,5 +994,115 @@ describe("retriggerComments preference (prev filtering)", () => {
 	it("validatePreferences rejects non-boolean retriggerComments", () => {
 		const result = validatePreferences(JSON.stringify({ retriggerComments: "yes" }));
 		expect(result.ok).toBe(false);
+	});
+
+	it("thread with new reply (same id) is NOT filtered out", async () => {
+		const { formatActionableItems } = await import("../src/analyzer");
+		// Thread t1 had one comment in prev (c1), now has two (c1 + c2)
+		const prev = makeStatus({
+			unresolvedThreads: 1,
+			threadDetails: [{
+				id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this",
+				allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix this" }],
+			}],
+		});
+		const curr = makeStatus({
+			unresolvedThreads: 1,
+			threadDetails: [{
+				id: "t1", isResolved: false, lastCommentAuthor: "bob", lastCommentBody: "I pushed a fix",
+				allComments: [
+					{ id: "c1", author: "alice", restApiId: "1", body: "fix this" },
+					{ id: "c2", author: "bob", restApiId: "2", body: "I pushed a fix" },
+				],
+			}],
+		});
+
+		// With prev: the new reply on thread t1 should NOT be filtered
+		const result = formatActionableItems(curr, config, {}, prev);
+		expect(result).not.toBeNull();
+		expect(result).toContain("1 unresolved review thread");
+		expect(result).toContain("bob");
+	});
+
+	it("reminder template uses full counts when only CI is new", async () => {
+		const { formatActionableItems } = await import("../src/analyzer");
+		const prev = makeStatus({
+			unresolvedThreads: 5,
+			failingChecks: [],
+			threadDetails: [
+				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix" }] },
+			],
+		});
+		const curr = makeStatus({
+			unresolvedThreads: 5,
+			failingChecks: ["ci/test"],
+			checkDetails: [{ name: "ci/test", conclusion: "FAILURE" }],
+			threadDetails: [
+				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix" }] },
+			],
+		});
+
+		// With reminder pref and prev: CI fires, template should say 5 threads (not 0)
+		const result = formatActionableItems(curr, config, {
+			reminder: "You have {unresolvedThreads} unresolved threads on {prLabel}",
+		}, prev);
+		expect(result).toBe("You have 5 unresolved threads on v2nic/pi-ghpr-monitor#32");
+	});
+
+	it("formatAgentNotification with prev filters detailed blocks", async () => {
+		const { formatAgentNotification } = await import("../src/analyzer");
+		const prev = makeStatus({
+			unresolvedThreads: 1,
+			generalComments: 1,
+			threadDetails: [{
+				id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "old",
+				allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "old" }],
+			}],
+			commentDetails: [
+				{ id: "gc1", restApiId: "10", author: "carol", body: "seen this" },
+			],
+		});
+		const curr = makeStatus({
+			unresolvedThreads: 1,
+			generalComments: 2,
+			threadDetails: [{
+				id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "old",
+				allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "old" }],
+			}],
+			commentDetails: [
+				{ id: "gc1", restApiId: "10", author: "carol", body: "seen this" },
+				{ id: "gc2", restApiId: "11", author: "dave", body: "new comment" },
+			],
+		});
+
+		const result = formatAgentNotification(curr, config, {}, prev);
+		expect(result).not.toBeNull();
+		// The detailed section should only mention the NEW comment (gc2), not the old one (gc1)
+		expect(result!.detailed).toContain("gc2");
+		expect(result!.detailed).not.toContain("gc1");
+		// The concise should mention the new comment
+		expect(result!.concise).toContain("1 new general comment");
+	});
+
+	it("formatAgentNotification without prev includes all detailed blocks", async () => {
+		const { formatAgentNotification } = await import("../src/analyzer");
+		const curr = makeStatus({
+			unresolvedThreads: 1,
+			generalComments: 2,
+			threadDetails: [{
+				id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix",
+				allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix" }],
+			}],
+			commentDetails: [
+				{ id: "gc1", restApiId: "10", author: "carol", body: "first" },
+				{ id: "gc2", restApiId: "11", author: "dave", body: "second" },
+			],
+		});
+
+		const result = formatAgentNotification(curr, config);
+		expect(result).not.toBeNull();
+		// Without prev: all items should appear
+		expect(result!.detailed).toContain("gc1");
+		expect(result!.detailed).toContain("gc2");
 	});
 });

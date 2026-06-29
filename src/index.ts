@@ -656,6 +656,11 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				const hadChange = update.length > 0;
 				let updateSentThisCycle = false;
 
+				// When retriggerComments is false (the default), pass the previous status
+				// snapshot to reminder/nudge formatters so they only report new items.
+				const retrigger = currentPreferences.retriggerComments ?? DEFAULT_RETRIGGER_COMMENTS;
+				const prevStatus = !retrigger ? (mon.lastStatus ?? undefined) : undefined;
+
 				if (update) {
 					if (agentTurnActive) {
 						// Don't spam the LLM while it's working - queue for later
@@ -674,11 +679,9 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				// — but skip if a status update was already sent this cycle to avoid
 				//   duplicate content (e.g. first-poll overlap when lastStatus is null)
 				if (!updateSentThisCycle && mon.needsReminder && !agentTurnActive) {
-					const retrigger = currentPreferences.retriggerComments ?? DEFAULT_RETRIGGER_COMMENTS;
-					const prevForReminder = !retrigger ? mon.lastStatus ?? undefined : undefined;
-					const reminder = formatActionableItems(curr, config, currentPreferences, prevForReminder);
+					const reminder = formatActionableItems(curr, config, currentPreferences, prevStatus);
 					if (reminder && reminder !== mon.lastSentReminder) {
-						const detReminder = formatAgentNotification(curr, config, currentPreferences, prevForReminder); sendPRNotification(reminder, detReminder?.detailed ?? reminder, {deliverAs: "steer", host: config.host});
+						const detReminder = formatAgentNotification(curr, config, currentPreferences, prevStatus); sendPRNotification(reminder, detReminder?.detailed ?? reminder, {deliverAs: "steer", host: config.host});
 						mon.lastSentReminder = reminder;
 						mon.lastNudgeTime = Date.now();
 					}
@@ -687,14 +690,14 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 
 				// Force-check: always consume the flag so /ghpr-monitor check is never
 				// a no-op. When the agent is active, queue the result for flush on turn_end.
+				// Intentional: does NOT pass prevStatus — explicit user checks always
+				// report the full current state regardless of the retriggerComments pref.
 				if (mon.forceNotify) {
 					// IMPORTANT: Use prLabel (owner/repo#number) in notification text, NOT prUrl.
 					// See the merged/closed notification above for why.
 					const prLabel = `${config.owner}/${config.repo}#${config.number}`;
-					const retrigger = currentPreferences.retriggerComments ?? DEFAULT_RETRIGGER_COMMENTS;
-					const prevForCheck = !retrigger ? mon.lastStatus ?? undefined : undefined;
-					const items = formatActionableItems(curr, config, currentPreferences, prevForCheck);
-					const detItems = formatAgentNotification(curr, config, currentPreferences, prevForCheck);
+					const items = formatActionableItems(curr, config, currentPreferences);
+					const detItems = formatAgentNotification(curr, config, currentPreferences);
 					const msg = items ?? `\u2705 No issues found on ${prLabel}`;
 					const detMsg = detItems?.detailed ?? `\u2705 No issues found on ${prLabel}`;
 					if (agentTurnActive) {
@@ -714,10 +717,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					mon.lastNudgeTime > 0 &&
 					Date.now() - mon.lastNudgeTime >= NUDGE_COOLDOWN_MS
 				) {
-					const retrigger = currentPreferences.retriggerComments ?? DEFAULT_RETRIGGER_COMMENTS;
-					const prevForNudge = !retrigger ? mon.lastStatus ?? undefined : undefined;
-					const nudge = formatActionableItems(curr, config, currentPreferences, prevForNudge);
-					const detNudge = formatAgentNotification(curr, config, currentPreferences, prevForNudge);
+					const nudge = formatActionableItems(curr, config, currentPreferences, prevStatus);
+					const detNudge = formatAgentNotification(curr, config, currentPreferences, prevStatus);
 					if (nudge) {
 						sendPRNotification(nudge, detNudge?.detailed ?? nudge, {deliverAs: "steer", host: config.host});
 						mon.lastSentReminder = nudge;
