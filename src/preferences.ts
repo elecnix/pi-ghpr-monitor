@@ -21,6 +21,7 @@
  *   firstPoll:    {intervalSec}
  *   descriptionStaleness: {commitOid}, {commitShortOid}, {commitUrl}
  *   prCreateNudge: {prUrl}
+ *   retriggerComments: (boolean, no template vars)
  */
 
 import { Type } from "@sinclair/typebox";
@@ -92,6 +93,12 @@ export const PreferencesSchema = Type.Object(
 					"Prompt override for auto-detecting gh pr create output and nudging the LLM to start monitoring. Variables: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}",
 			}),
 		),
+		retriggerComments: Type.Optional(
+			Type.Boolean({
+				description:
+					"When true, reminders and periodic nudges re-report all comments and threads, even those already seen. Default false (only report new items).",
+			}),
+		),
 	},
 	{
 		additionalProperties: false,
@@ -100,11 +107,19 @@ export const PreferencesSchema = Type.Object(
 
 export type Preferences = Static<typeof PreferencesSchema>;
 
+/** Default value for retriggerComments (used at runtime; not a template). */
+export const DEFAULT_RETRIGGER_COMMENTS = false;
+
 /** Allowed preference keys for validation error messages */
 const ALLOWED_KEYS = new Set(Object.keys(PreferencesSchema.properties));
 
 /** Preference keys that are not string templates (skip template variable validation). */
-const NON_TEMPLATE_KEYS = new Set<string>(["ignoredBots"]);
+const NON_TEMPLATE_KEY_VALUES = ["ignoredBots", "retriggerComments"] as const;
+/** Runtime set for .has() lookups. */
+const NON_TEMPLATE_KEYS = new Set<string>(NON_TEMPLATE_KEY_VALUES);
+
+/** Type union of non-template preference keys — derived from the canonical array. */
+type NonTemplateKey = (typeof NON_TEMPLATE_KEY_VALUES)[number];
 
 // ---------------------------------------------------------------------------
 // Default preference templates
@@ -386,9 +401,9 @@ export function getEffectivePreferences(prefs: Preferences): Partial<Record<keyo
 	for (const key of Object.keys(DEFAULT_PREFERENCES) as (keyof Preferences)[]) {
 		const override = prefs[key];
 		if (override !== undefined && override !== "") {
-			result[key] = override;
+			result[key] = override as string;
 		} else if (DEFAULT_PREFERENCES[key] !== undefined) {
-			result[key] = DEFAULT_PREFERENCES[key];
+			result[key] = DEFAULT_PREFERENCES[key] as string;
 		}
 		// Keys with undefined defaults are simply omitted — they have
 		// computed defaults that can't be represented as a template.
@@ -479,7 +494,7 @@ export function getPreferencesPath(): string {
  * template variables. If not set, return the default value.
  */
 export function getPreferenceWithDefault(
-	key: keyof Preferences,
+	key: Exclude<keyof Preferences, NonTemplateKey>,
 	prefs: Preferences,
 	vars: TemplateVars,
 	defaultValue: string,
