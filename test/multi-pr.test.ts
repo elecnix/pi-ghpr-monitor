@@ -290,7 +290,7 @@ describe("Multi-PR architecture structure", () => {
 	});
 
 	it("tool supports start, status, and check actions (NOT stop)", () => {
-		const match = src.match(/action:\s*StringEnum\(\[([^\]]+)\]/);
+		const match = src.match(/action:\s*Type\.Union\(\[(.+)\]\)/);
 		expect(match).not.toBeNull();
 		const actions = match![1];
 		expect(actions).toContain('"start"');
@@ -320,13 +320,18 @@ describe("Multi-PR architecture structure", () => {
 		expect(checkBlock).toContain("monitors.get(key)");
 	});
 
-	it("tool stop action is forbidden for the agent", () => {
-		const stopBlock = src.slice(
-			src.indexOf('case "stop"'),
-			src.indexOf('default:', src.indexOf('case "stop"')), 
+	it("tool stop action is forbidden for the agent (handled in default/fallback)", () => {
+		// The stop action is NOT in the Type.Union, so it falls through to
+		// the default case which handles it as unknown/invalid via exhaustiveness check
+		const defaultBlock = src.slice(
+			src.indexOf('default:'),
+			src.indexOf("});\n\t});\n\t}", src.indexOf('default:')), 
 		);
-		expect(stopBlock).toContain("forbidden");
-		expect(stopBlock).not.toContain("stopMonitorByKey(key)"); // must not actually stop
+		// The default case includes exhaustiveness check via 'never' type
+		expect(defaultBlock).toContain("never");
+		// Stop action is NOT in the allowed actions (verified by earlier test)
+		const actionMatch = src.match(/action:\s*Type\.Union\(\[(.+)\]\)/);
+		expect(actionMatch![1]).not.toContain('"stop"');
 	});
 
 	it("start action returns already_running for duplicate monitor", () => {

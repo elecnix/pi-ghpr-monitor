@@ -424,6 +424,10 @@ export function getEffectivePreferences(prefs: Preferences): Partial<Record<keyo
 	const result: Partial<Record<keyof Preferences, string>> = {};
 	for (const key of Object.keys(DEFAULT_PREFERENCES) as (keyof Preferences)[]) {
 		const override = prefs[key];
+		if (key === "ignoredBots") {
+			// ignoredBots is string[], not a template string — skip
+			continue;
+		}
 		if (override !== undefined && override !== "") {
 			result[key] = override as string;
 		} else if (DEFAULT_PREFERENCES[key] !== undefined) {
@@ -524,8 +528,9 @@ export function getPreferenceWithDefault(
 	defaultValue: string,
 ): string {
 	const template = prefs[key];
+	if (key === "ignoredBots") return defaultValue;
 	if (template !== undefined && template !== "") {
-		return interpolateTemplate(template, vars);
+		return interpolateTemplate(template as string, vars);
 	}
 	return defaultValue;
 }

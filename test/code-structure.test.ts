@@ -77,10 +77,10 @@ describe("multi-PR monitoring architecture", () => {
 	});
 
 	it("tool does NOT expose stop action to the LLM", () => {
-		const actionMatch = src.match(/action:\s*StringEnum\(\[([^\]]+)\]/);
+		const actionMatch = src.match(/action:\s*Type\.Union\(\[(.+)\]\)/);
 		expect(actionMatch).not.toBeNull();
 		const actions = actionMatch![1];
-		expect(actions).toContain("start");
+		expect(actions).toContain('"start"');
 		expect(actions).toContain("status");
 		expect(actions).toContain("check");
 		expect(actions).toContain("merge");

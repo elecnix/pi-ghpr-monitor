@@ -84,6 +84,7 @@ describe("failingChecks", () => {
 					{
 						commit: {
 							oid: "test-oid",
+							status: null,
 							checkSuites: {
 								nodes: [
 									{
@@ -125,6 +126,7 @@ describe("pendingChecks", () => {
 					{
 						commit: {
 							oid: "test-oid",
+							status: null,
 							checkSuites: {
 								nodes: [
 									{
@@ -943,13 +945,13 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 			mergeStateStatus: "CLEAN",
 			state: "OPEN",
 			merged: false,
-			commits: { nodes: [{ commit: { oid: "test-oid", checkSuites: { nodes: [] } } }] },
+			commits: { nodes: [{ commit: { oid: "test-oid", status: null, checkSuites: { nodes: [] } } }] },
 		};
 		const status = snapshotPR(pr, []);
 		// c-2 is acknowledged, so only c-1 counts
 		expect(status.generalComments).toBe(1);
 		expect(status.commentDetails).toHaveLength(1);
-		expect(status.commentDetails[0].id).toBe("c-1");
+		expect(status.commentDetails![0].id).toBe("c-1");
 	});
 
 	it("filters out review threads whose last comment has THUMBS_UP", () => {
@@ -981,13 +983,13 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 			mergeStateStatus: "CLEAN",
 			state: "OPEN",
 			merged: false,
-			commits: { nodes: [{ commit: { oid: "test-oid", checkSuites: { nodes: [] } } }] },
+			commits: { nodes: [{ commit: { oid: "test-oid", status: null, checkSuites: { nodes: [] } } }] },
 		};
 		const status = snapshotPR(pr, []);
 		// t-2 is filtered because its last comment has THUMBS_UP
 		expect(status.unresolvedThreads).toBe(1);
 		expect(status.threadDetails).toHaveLength(1);
-		expect(status.threadDetails[0].id).toBe("t-1");
+		expect(status.threadDetails![0].id).toBe("t-1");
 	});
 
 	it("does not filter comments without reactions", () => {
@@ -1002,11 +1004,11 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 			mergeStateStatus: "CLEAN",
 			state: "OPEN",
 			merged: false,
-			commits: { nodes: [{ commit: { oid: "test-oid", checkSuites: { nodes: [] } } }] },
+			commits: { nodes: [{ commit: { oid: "test-oid", status: null, checkSuites: { nodes: [] } } }] },
 		};
 		const status = snapshotPR(pr, []);
 		expect(status.generalComments).toBe(1);
-		expect(status.commentDetails[0].id).toBe("c-1");
+		expect(status.commentDetails![0].id).toBe("c-1");
 	});
 
 	it("filters comments with THUMBS_UP but not other reactions", () => {
@@ -1022,13 +1024,13 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 			mergeStateStatus: "CLEAN",
 			state: "OPEN",
 			merged: false,
-			commits: { nodes: [{ commit: { oid: "test-oid", checkSuites: { nodes: [] } } }] },
+			commits: { nodes: [{ commit: { oid: "test-oid", status: null, checkSuites: { nodes: [] } } }] },
 		};
 		const status = snapshotPR(pr, []);
 		// c-1 has HEART (not THUMBS_UP), so it's kept
 		// c-2 has THUMBS_UP, so it's filtered
 		expect(status.generalComments).toBe(1);
-		expect(status.commentDetails[0].id).toBe("c-1");
+		expect(status.commentDetails![0].id).toBe("c-1");
 	});
 });
 
@@ -1621,7 +1623,7 @@ describe("snapshotPR maps databaseId/fullDatabaseId from GraphQL", () => {
 			},
 		});
 		const status = snapshotPR(pr, []);
-		expect(status.threadDetails[0].allComments![0].restApiId).toBe("12345");
+		expect(status.threadDetails![0].allComments![0].restApiId).toBe("12345");
 	});
 
 	it("maps general comment databaseId to CommentSummary.restApiId", () => {
@@ -1640,7 +1642,7 @@ describe("snapshotPR maps databaseId/fullDatabaseId from GraphQL", () => {
 			},
 		});
 		const status = snapshotPR(pr, []);
-		expect(status.commentDetails[0].restApiId).toBe("54321");
+		expect(status.commentDetails![0].restApiId).toBe("54321");
 	});
 
 	it("prefers fullDatabaseId over databaseId for review thread comment restApiId", () => {
@@ -1670,7 +1672,7 @@ describe("snapshotPR maps databaseId/fullDatabaseId from GraphQL", () => {
 			},
 		});
 		const status = snapshotPR(pr, []);
-		expect(status.threadDetails[0].allComments![0].restApiId).toBe("99999");
+		expect(status.threadDetails![0].allComments![0].restApiId).toBe("99999");
 	});
 });
 
@@ -1815,7 +1817,7 @@ describe("snapshotPR ignoredBots filtering (general comments only)", () => {
 		const status = snapshotPR(pr, ["linear", "sonarqubecloud"]);
 		expect(status.generalComments).toBe(1);
 		expect(status.commentDetails).toHaveLength(1);
-		expect(status.commentDetails[0].author).toBe("alice");
+		expect(status.commentDetails![0].author).toBe("alice");
 	});
 
 	it("does not filter general comments from non-ignored users", () => {
@@ -1851,7 +1853,7 @@ describe("snapshotPR ignoredBots filtering (general comments only)", () => {
 		const status = snapshotPR(pr, ["linear"]);
 		expect(status.unresolvedThreads).toBe(1);
 		expect(status.threadDetails).toHaveLength(1);
-		expect(status.threadDetails[0].lastCommentAuthor).toBe("linear");
+		expect(status.threadDetails![0].lastCommentAuthor).toBe("linear");
 	});
 
 	it("filters all comments when all authors are ignored", () => {

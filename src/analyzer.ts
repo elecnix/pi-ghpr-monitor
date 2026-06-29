@@ -165,9 +165,9 @@ export interface PRStatus {
 	 *  commit or no headline is available. */
 	lastCommitMessageHeadline: string;
 	// Detail for enriched notifications
-	threadDetails: ThreadSummary[];
-	commentDetails: CommentSummary[];
-	checkDetails: CheckSummary[];
+	threadDetails?: ThreadSummary[];
+	commentDetails?: CommentSummary[];
+	checkDetails?: CheckSummary[];
 	// Commit statuses (old-style status API)
 	failingStatuses?: string[];
 	pendingStatuses?: string[];
