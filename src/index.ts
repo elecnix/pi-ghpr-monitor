@@ -1222,6 +1222,18 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			if (raw.toLowerCase() === "merge" || raw.toLowerCase().startsWith("merge ")) {
 				const rest = raw.replace(/^merge\s*/i, "").trim();
 				if (!rest) {
+					// No argument: if exactly one PR monitored, toggle it; otherwise show status
+					const prMonitors = [...monitors.entries()]
+						.filter(([, mon]) => mon.config.resourceType !== "issue");
+					if (prMonitors.length === 1) {
+						const [key, mon] = prMonitors[0]!;
+						mon.config.autoMerge = !mon.config.autoMerge;
+						ctx.ui.notify(
+							`Auto-merge ${mon.config.autoMerge ? "enabled" : "disabled"} for ${key}.${mon.config.autoMerge ? " The monitor will notify to merge when CI passes." : ""}`,
+							"info",
+						);
+						return;
+					}
 					// Show which monitors have auto-merge enabled
 					const autoMergeMonitors = [...monitors.entries()]
 						.filter(([, mon]) => mon.config.autoMerge);
