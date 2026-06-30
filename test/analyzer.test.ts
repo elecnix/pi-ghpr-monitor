@@ -516,6 +516,136 @@ describe("formatStatusUpdate", () => {
 		const update = formatStatusUpdate(null, curr, config);
 		expect(update).not.toContain("pending");
 	});
+
+	// -- auto-merge (ciGreenMerge) tests --
+
+	const autoMergeConfig: MonitorConfig = {
+		owner: "v2nic",
+		repo: "gh-pr-review",
+		number: 42,
+		host: "github.com",
+		mode: "all",
+		intervalSec: 60,
+		debounceSec: 30,
+		autoMerge: true,
+	};
+
+	it("emits ciGreenMerge template when CI transitions to green and autoMerge is true", () => {
+		const prev: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: ["ci/test"],
+			pendingChecks: ["ci/build"],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+			lastCommitMessageHeadline: "",
+		};
+		const curr: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+			lastCommitMessageHeadline: "",
+		};
+		const update = formatStatusUpdate(prev, curr, autoMergeConfig, { ciGreenMerge: "Please merge {prLabel}" });
+		expect(update).toContain("Please merge");
+		expect(update).not.toContain("passed");
+	});
+
+	it("does NOT emit merge message when autoMerge is false (default)", () => {
+		const prev: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: ["ci/test"],
+			pendingChecks: ["ci/build"],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+			lastCommitMessageHeadline: "",
+		};
+		const curr: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+			lastCommitMessageHeadline: "",
+		};
+		const update = formatStatusUpdate(prev, curr, config, { ciGreenMerge: "Please merge {prLabel}" });
+		expect(update).toContain("passed");
+		expect(update).not.toContain("Please merge");
+	});
+
+	it("does NOT emit merge message when CI was already green (no transition)", () => {
+		const prev: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+			lastCommitMessageHeadline: "",
+		};
+		const curr: PRStatus = { ...prev };
+		const update = formatStatusUpdate(prev, curr, autoMergeConfig, { ciGreenMerge: "Please merge {prLabel}" });
+		expect(update).toBe("");
+	});
+
+	it("does NOT emit merge message on first poll (prev=null) even with autoMerge", () => {
+		const curr: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+			lastCommitMessageHeadline: "",
+		};
+		const update = formatStatusUpdate(null, curr, autoMergeConfig, { ciGreenMerge: "Please merge {prLabel}" });
+		expect(update).not.toContain("Please merge");
+	});
+
+	it("emits merge message when CI transitions to green with autoMerge and also has threads", () => {
+		const prev: PRStatus = {
+			unresolvedThreads: 0,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: ["ci/test"],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+			lastCommitMessageHeadline: "",
+		};
+		const curr: PRStatus = {
+			unresolvedThreads: 1,
+			generalComments: 0,
+			hasConflicts: false,
+			failingChecks: [],
+			pendingChecks: [],
+			lastCommentTimestamp: "",
+			lastCommentBySelf: false,
+			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+			lastCommitMessageHeadline: "",
+		};
+		const update = formatStatusUpdate(prev, curr, autoMergeConfig, { ciGreenMerge: "Please merge {prLabel}" });
+		expect(update).toContain("Please merge");
+		expect(update).not.toContain("all clear"); // merge message supersedes all-clear
+	});
 });
 describe("formatActionableItems", () => {
 	const config: MonitorConfig = {
@@ -1047,6 +1177,23 @@ describe("formatFooterStatus", () => {
 		const ghConfig = { ...config, host: "github.corp.com" };
 		const result = formatFooterStatus(ghConfig, null);
 		expect(result).toBe("📡 https://github.corp.com/mobilityhouse/vgi-na-masscec/pull/366");
+	});
+
+	it("shows auto-merge emoji when autoMerge is enabled", () => {
+		const autoMergeConfig = { ...config, autoMerge: true };
+		const status = clean;
+		const result = formatFooterStatus(autoMergeConfig, status);
+		expect(result).toBe("📡 https://github.com/mobilityhouse/vgi-na-masscec/pull/366 🔀");
+	});
+
+	it("does not show auto-merge emoji for issues", () => {
+		const issueConfig = { ...config, resourceType: "issue" as const, autoMerge: true };
+		const issueStatus: IssueStatus = {
+			title: "test", state: "OPEN", generalComments: 0,
+			lastCommentTimestamp: "", commentDetails: [],
+		};
+		const result = formatFooterStatus(issueConfig, issueStatus);
+		expect(result).not.toContain("🔀");
 	});
 });
 

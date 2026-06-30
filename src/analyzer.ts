@@ -187,6 +187,8 @@ export interface MonitorConfig {
 	mode: "all" | "comments" | "conflicts" | "actions";
 	intervalSec: number;
 	debounceSec: number;
+	/** When true, notify the agent to merge the PR once CI passes. Opt-in, false by default. */
+	autoMerge?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -592,7 +594,10 @@ export function formatStatusUpdate(prev: PRStatus | null, curr: PRStatus, config
 		}
 	}
 
-	// All checks passed (including commit statuses)
+	// All checks passed (including commit statuses).
+	// When auto-merge is enabled, emit the ciGreenMerge template instead of
+	// the standard "All CI checks passed" message.
+	let emittedMergeMessage = false;
 	if (
 		curr.pendingChecks.length === 0 &&
 		curr.failingChecks.length === 0 &&
@@ -600,11 +605,19 @@ export function formatStatusUpdate(prev: PRStatus | null, curr: PRStatus, config
 		prev &&
 		(prev.pendingChecks.length > 0 || prev.failingChecks.length > 0 || (prev.pendingStatuses ?? []).length > 0)
 	) {
-		lines.push(`✅ All CI checks passed on ${prLabel}`);
+		if (config.autoMerge && prefs?.ciGreenMerge) {
+			lines.push(interpolateTemplate(prefs.ciGreenMerge, makeTemplateVars(config)));
+			emittedMergeMessage = true;
+		} else {
+			lines.push(`✅ All CI checks passed on ${prLabel}`);
+		}
 	}
 
-	// No issues at all — only when first seen or transitioning from issues
+	// No issues at all — only when first seen or transitioning from issues.
+	// Skip the all-clear message when a merge message was just emitted
+	// (the merge request supersedes the generic all-clear).
 	if (
+		!emittedMergeMessage &&
 		!curr.hasConflicts &&
 		curr.unresolvedThreads === 0 &&
 		curr.generalComments === 0 &&
@@ -933,6 +946,7 @@ export function formatFooterStatus(config: MonitorConfig, status: PRStatus | Iss
 	if (!status) return `📡 ${resourceLabel}`;
 
 	const emojis: string[] = [];
+	if (config.autoMerge && !isIssue) emojis.push("🔀");
 	if ("hasConflicts" in status && status.hasConflicts) emojis.push("⚠️");
 	if ("unresolvedThreads" in status && status.unresolvedThreads > 0) emojis.push("💬");
 	if (status.generalComments > 0) emojis.push("💭");

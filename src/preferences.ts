@@ -93,6 +93,18 @@ export const PreferencesSchema = Type.Object(
 					"Prompt override for auto-detecting gh pr create output and nudging the LLM to start monitoring. Variables: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}",
 			}),
 		),
+		ciGreenMerge: Type.Optional(
+			Type.String({
+				description:
+					"Prompt override for when auto-merge is enabled and CI turns green. Variables: {owner}, {repo}, {number}, {host}, {prLabel}",
+			}),
+		),
+		disableMergeTool: Type.Optional(
+			Type.Boolean({
+				description:
+					"When true, the merge tool action is unavailable to the LLM. The /ghpr-monitor merge slash command always works regardless. Default: true.",
+			}),
+		),
 		retriggerComments: Type.Optional(
 			Type.Boolean({
 				description:
@@ -110,11 +122,14 @@ export type Preferences = Static<typeof PreferencesSchema>;
 /** Default value for retriggerComments (used at runtime; not a template). */
 export const DEFAULT_RETRIGGER_COMMENTS = false;
 
+/** Default value for disableMergeTool (false = LLM can use merge tool). */
+export const DEFAULT_DISABLE_MERGE_TOOL = false;
+
 /** Allowed preference keys for validation error messages */
 const ALLOWED_KEYS = new Set(Object.keys(PreferencesSchema.properties));
 
 /** Preference keys that are not string templates (skip template variable validation). */
-const NON_TEMPLATE_KEY_VALUES = ["ignoredBots", "retriggerComments"] as const;
+const NON_TEMPLATE_KEY_VALUES = ["ignoredBots", "retriggerComments", "disableMergeTool"] as const;
 /** Runtime set for .has() lookups. */
 const NON_TEMPLATE_KEYS = new Set<string>(NON_TEMPLATE_KEY_VALUES);
 
@@ -146,6 +161,7 @@ export const DEFAULT_PREFERENCES: Partial<Record<keyof Preferences, string | und
 	firstPoll: "📡 Monitoring {owner}/{repo}#{number}... (polling every {intervalSec}s)",
 	descriptionStaleness: undefined,
 	prCreateNudge: DEFAULT_PR_CREATE_NUDGE,
+	ciGreenMerge: "✅ CI is green on {prLabel}. Please merge the pull request.",
 };
 
 // ---------------------------------------------------------------------------
@@ -337,11 +353,16 @@ export function validatePreferences(jsonString: string): ValidationResult {
 		}
 
 		const parsedObj = parsed as Record<string, unknown>;
+		const BOOLEAN_KEYS = new Set(["retriggerComments", "disableMergeTool"]);
 		for (const [key, value] of Object.entries(parsedObj)) {
 			if (value === undefined) continue;
 			if (key === "ignoredBots") {
 				if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) {
 					errors.push(`Expected array of strings for '${key}', got ${typeof value}`);
+				}
+			} else if (BOOLEAN_KEYS.has(key)) {
+				if (typeof value !== "boolean") {
+					errors.push(`Expected boolean for '${key}', got ${typeof value}`);
 				}
 			} else if (typeof value !== "string") {
 				errors.push(`Expected string or null for '${key}', got ${typeof value}`);
