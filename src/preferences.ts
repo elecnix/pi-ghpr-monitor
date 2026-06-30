@@ -19,7 +19,7 @@
  *   reminder:     {unresolvedThreads}, {generalComments}, {failingChecks}, {conflict}
  *   allClear:     (none extra)
  *   firstPoll:    {intervalSec}
- *   descriptionStaleness: {commitOid}, {commitShortOid}, {commitUrl}
+ *   descriptionStaleness: {commitOid}, {commitShortOid}, {commitUrl}, {commitAuthor}, {commitCoauthors}, {commitMessageHeadline}
  *   prCreateNudge: {prUrl}
  *   retriggerComments: (boolean, no template vars)
  */
@@ -84,7 +84,7 @@ export const PreferencesSchema = Type.Object(
 		descriptionStaleness: Type.Optional(
 			Type.String({
 				description:
-					"Prompt override for description staleness nudge when new commits are detected. Variables: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, {commitOid}, {commitShortOid}, {commitUrl}, {commitAuthor}, {commitCoauthors}",
+					"Prompt override for description staleness nudge when new commits are detected. Variables: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, {commitOid}, {commitShortOid}, {commitUrl}, {commitAuthor}, {commitCoauthors}, {commitMessageHeadline}",
 			}),
 		),
 		prCreateNudge: Type.Optional(
@@ -197,9 +197,10 @@ export interface TemplateVars {
 	commitUrl?: string;
 	commitAuthor?: string;
 	commitCoauthors?: string;
+	commitMessageHeadline?: string;
 }
 
-const TEMPLATE_VAR_RE = /\{(owner|repo|number|host|prLabel|prUrl|unresolvedThreads|generalComments|failingChecks|conflict|intervalSec|commitOid|commitShortOid|commitUrl|commitAuthor|commitCoauthors)\}/g;
+const TEMPLATE_VAR_RE = /\{(owner|repo|number|host|prLabel|prUrl|unresolvedThreads|generalComments|failingChecks|conflict|intervalSec|commitOid|commitShortOid|commitUrl|commitAuthor|commitCoauthors|commitMessageHeadline)\}/g;
 
 /** Non-global version for .test() checks. The /g flag causes .test() to
  *  advance lastIndex across successive calls, producing false negatives.
@@ -247,6 +248,8 @@ export function interpolateTemplate(template: string, vars: TemplateVars): strin
 				return vars.commitAuthor ?? match;
 			case "commitCoauthors":
 				return vars.commitCoauthors ?? match;
+			case "commitMessageHeadline":
+				return vars.commitMessageHeadline ?? match;
 			default:
 				return match;
 		}

@@ -58,6 +58,7 @@ function makeMockStatus(overrides: Partial<PRStatus> = {}): PRStatus {
 		lastCommentTimestamp: "",
 		lastCommentBySelf: false,
 		lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		threadDetails: [],
 		commentDetails: [],
 		checkDetails: [],

@@ -381,6 +381,7 @@ describe("formatStatusUpdate", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		expect(update).toContain("all clear");
@@ -396,6 +397,7 @@ describe("formatStatusUpdate", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		expect(update).toContain("conflict");
@@ -411,6 +413,7 @@ describe("formatStatusUpdate", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		expect(update).toContain("Failing");
@@ -427,6 +430,7 @@ describe("formatStatusUpdate", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		};
 		const curr: PRStatus = {
 			...prev,
@@ -446,6 +450,7 @@ describe("formatStatusUpdate", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		};
 		const curr: PRStatus = {
 			unresolvedThreads: 0,
@@ -456,6 +461,7 @@ describe("formatStatusUpdate", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		};
 		const update = formatStatusUpdate(prev, curr, config);
 		expect(update).toContain("passed");
@@ -471,6 +477,7 @@ describe("formatStatusUpdate", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		expect(update).toContain("all clear");
@@ -486,6 +493,7 @@ describe("formatStatusUpdate", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		// When prev is null, format uses "N new" format since prev count defaults to 0
@@ -502,6 +510,7 @@ describe("formatStatusUpdate", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		};
 		const update = formatStatusUpdate(null, curr, config);
 		expect(update).not.toContain("pending");
@@ -528,6 +537,7 @@ describe("formatActionableItems", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		};
 		expect(formatActionableItems(status, config)).toBeNull();
 	});
@@ -542,6 +552,7 @@ describe("formatActionableItems", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		};
 		const result = formatActionableItems(status, config);
 		expect(result).toContain("Merge conflicts detected");
@@ -557,6 +568,7 @@ describe("formatActionableItems", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		};
 		const result = formatActionableItems(status, config);
 		expect(result).toContain("Failing CI checks");
@@ -574,6 +586,7 @@ describe("formatActionableItems", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		};
 		const result = formatActionableItems(status, config);
 		expect(result).toContain("3 unresolved review thread(s)");
@@ -589,6 +602,7 @@ describe("formatActionableItems", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		};
 		const result = formatActionableItems(status, config);
 		expect(result).toContain("2 general comment(s)");
@@ -604,6 +618,7 @@ describe("formatActionableItems", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		};
 		expect(formatActionableItems(status, config)).toBeNull();
 	});
@@ -618,6 +633,7 @@ describe("formatActionableItems", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		};
 		expect(formatActionableItems(status, config)).toBeNull();
 	});
@@ -632,6 +648,7 @@ describe("formatActionableItems", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		};
 		const result = formatActionableItems(status, config);
 		expect(result).toContain("Merge conflicts detected");
@@ -663,6 +680,7 @@ describe("formatStatusUpdate with detail", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 			threadDetails: [
 				{ id: "PRRT_1", isResolved: false, lastCommentAuthor: "reviewer", lastCommentBody: "Please fix this typo" },
 				{ id: "PRRT_2", isResolved: false, lastCommentAuthor: "bot", lastCommentBody: "Build failed" },
@@ -687,6 +705,7 @@ describe("formatStatusUpdate with detail", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 			threadDetails: [],
 			commentDetails: [
 				{ id: "C_1", restApiId: "301", author: "teammate", body: "Can you add tests?" },
@@ -709,6 +728,7 @@ describe("formatStatusUpdate with detail", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 			threadDetails: [],
 			commentDetails: [],
 			checkDetails: [
@@ -731,6 +751,7 @@ describe("formatStatusUpdate with detail", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 			threadDetails: [],
 			commentDetails: [
 				{ id: "C_1", restApiId: "302", author: "user", body: longBody },
@@ -753,6 +774,7 @@ describe("formatStatusUpdate with detail", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 			threadDetails: [],
 			commentDetails: [
 				{ id: "C_1", restApiId: "303", author: "v2nic", body: multilineBody },
@@ -891,6 +913,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			failingChecks: [], pendingChecks: [],
 			lastCommentTimestamp: "", lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 			threadDetails: [], commentDetails: [], checkDetails: [],
 		};
 		const result = formatStatusUpdate(null, clean, config);
@@ -903,6 +926,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			failingChecks: ["ci/test"], pendingChecks: [],
 			lastCommentTimestamp: "", lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 			threadDetails: [], commentDetails: [],
 			checkDetails: [{ name: "ci/test", conclusion: "FAILURE" }],
 		};
@@ -911,6 +935,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			failingChecks: [], pendingChecks: [],
 			lastCommentTimestamp: "", lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 			threadDetails: [], commentDetails: [], checkDetails: [],
 		};
 		const result = formatStatusUpdate(hadIssues, clean, config);
@@ -923,6 +948,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			failingChecks: [], pendingChecks: [],
 			lastCommentTimestamp: "", lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 			threadDetails: [], commentDetails: [], checkDetails: [],
 		};
 		const result = formatStatusUpdate(clean, clean, config);
@@ -935,6 +961,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			failingChecks: [], pendingChecks: [],
 			lastCommentTimestamp: "", lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 			threadDetails: [], commentDetails: [], checkDetails: [],
 		};
 		const first = formatStatusUpdate(null, clean, config);
@@ -954,6 +981,7 @@ describe("formatFooterStatus", () => {
 		failingChecks: [], pendingChecks: [],
 		lastCommentTimestamp: "", lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 		threadDetails: [], commentDetails: [], checkDetails: [],
 	};
 
@@ -1521,6 +1549,7 @@ describe("formatThreadDetailBlock", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 			threadDetails: [thread],
 			commentDetails: [],
 			checkDetails: [],
@@ -1550,6 +1579,7 @@ describe("formatCommentDetailBlock includes restApiId", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 			threadDetails: [],
 			commentDetails: [
 				{ id: "IC_1", restApiId: "54321", author: "bot", body: "Deploy done", fullBody: "Deploy notification" },
@@ -1590,6 +1620,7 @@ describe("formatThreadDetails concise", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 			threadDetails: [
 				{ id: "PRRT_abc", isResolved: false, lastCommentAuthor: "reviewer", lastCommentBody: "Fix this" },
 			],
@@ -1610,6 +1641,7 @@ describe("formatThreadDetails concise", () => {
 			lastCommentTimestamp: "",
 			lastCommentBySelf: false,
 			lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
 			threadDetails: [],
 			commentDetails: [
 				{ id: "IC_1", restApiId: "54321", author: "bot", body: "Deploy done" },
