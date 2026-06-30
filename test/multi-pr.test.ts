@@ -675,6 +675,7 @@ describe("Description staleness nudge architecture", () => {
 		expect(stalenessBlock).toContain("commitUrl,");
 		expect(stalenessBlock).toContain("commitAuthor,");
 		expect(stalenessBlock).toContain("commitCoauthors,");
+		expect(stalenessBlock).toContain("commitMessageHeadline:");
 	});
 
 	it("includes the commit author in the default staleness message", () => {
@@ -682,7 +683,14 @@ describe("Description staleness nudge architecture", () => {
 		// "by <author>" clause that is omitted when the author is unknown.
 		expect(src).toContain("curr.lastCommitAuthor");
 		expect(src).toMatch(/by \$\{commitAuthor\}/);
-		expect(src).toMatch(/pushed to \$\{prLabel\}\$\{authorClause\}/);
+		expect(src).toMatch(/pushed to \$\{prLabel\}\$\{headlineClause\}\$\{authorClause\}/);
+	});
+
+	it("includes the commit headline in the default staleness message", () => {
+		// The headline is the first line of the commit message, shown in quotes.
+		expect(src).toContain("curr.lastCommitMessageHeadline");
+		expect(src).toMatch(/headlineClause/);
+		expect(src).toMatch(/"\$\{commitHeadline\}"/);
 	});
 
 	it("includes co-authors in the default staleness message, on by default", () => {
@@ -690,7 +698,7 @@ describe("Description staleness nudge architecture", () => {
 		// ", co-authored by ..." clause, omitted when there are no co-authors.
 		expect(src).toContain("curr.lastCommitCoauthors");
 		expect(src).toMatch(/co-authored by \$\{commitCoauthors\}/);
-		expect(src).toMatch(/\$\{prLabel\}\$\{authorClause\}\$\{coauthorClause\}/);
+		expect(src).toMatch(/\$\{prLabel\}\$\{headlineClause\}\$\{authorClause\}\$\{coauthorClause\}/);
 	});
 });
 

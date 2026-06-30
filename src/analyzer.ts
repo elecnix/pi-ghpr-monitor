@@ -83,6 +83,9 @@ export interface CommitNode {
 		/** Commit message body, used to extract Co-authored-by trailers.
 		 *  Optional: present in live API responses, may be omitted in fixtures. */
 		messageBody?: string | null;
+		/** First line of the commit message (the subject / headline).
+		 *  Optional: present in live API responses, may be omitted in fixtures. */
+		messageHeadline?: string | null;
 		checkSuites: { nodes: CheckSuiteNode[] };
 		status: CommitStatusNode | null;
 	};
@@ -158,6 +161,9 @@ export interface PRStatus {
 	 *  trailers in the commit message and joined with ", ". Empty string when
 	 *  the commit has no co-authors. */
 	lastCommitCoauthors: string;
+	/** First line of the latest commit's message. Empty string when no
+	 *  commit or no headline is available. */
+	lastCommitMessageHeadline: string;
 	// Detail for enriched notifications
 	threadDetails: ThreadSummary[];
 	commentDetails: CommentSummary[];
@@ -412,6 +418,8 @@ export function snapshotPR(pr: PullRequestData, ignoredBots: string[]): PRStatus
 		latestCommit?.author?.user?.login ?? latestCommit?.author?.name ?? "";
 	// Co-authors come from the Co-authored-by trailers; empty when there are none.
 	const lastCommitCoauthors = parseCoauthors(latestCommit?.messageBody).join(", ");
+	// Commit subject line (first line of the commit message).
+	const lastCommitMessageHeadline = latestCommit?.messageHeadline ?? "";
 
 	return {
 		unresolvedThreads: countUnresolvedThreads(pr),
@@ -427,6 +435,7 @@ export function snapshotPR(pr: PullRequestData, ignoredBots: string[]): PRStatus
 		lastCommitOid,
 		lastCommitAuthor,
 		lastCommitCoauthors,
+		lastCommitMessageHeadline,
 		threadDetails: threads,
 		commentDetails: comments,
 		checkDetails: checks,

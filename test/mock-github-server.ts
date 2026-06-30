@@ -132,7 +132,8 @@ function buildGraphQLResponse(state: MockPRState): object {
 								commit: {
 									oid: "abc123def456789",
 									author: { name: "Test Author", user: { login: "testauthor" } },
-									messageBody: "Some change\n\nCo-authored-by: Co Author <co@example.com>",
+									messageHeadline: "Some change",
+							messageBody: "Some change\n\nCo-authored-by: Co Author <co@example.com>",
 									checkSuites: {
 										nodes: checkSuiteNodes,
 									},
