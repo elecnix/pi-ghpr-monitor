@@ -19,6 +19,7 @@ import {
 	interpolateTemplate,
 	getPreferenceWithDefault,
 	DEFAULT_PREFERENCES,
+	DEFAULT_DISABLE_MERGE_TOOL,
 	getEffectivePreferences,
 	type Preferences,
 	type TemplateVars,
@@ -147,6 +148,18 @@ describe("validatePreferences", () => {
 	it("accepts preference with template variables", () => {
 		const result = validatePreferences('{"ciFailure": "💥 CI failed on {prLabel}: {failingChecks}"}');
 		expect(result.ok).toBe(true);
+	});
+
+	it("accepts disableMergeTool as a boolean", () => {
+		const result = validatePreferences('{"disableMergeTool": true}');
+		expect(result.ok).toBe(true);
+		expect(result.preferences!.disableMergeTool).toBe(true);
+	});
+
+	it("rejects disableMergeTool as a string", () => {
+		const result = validatePreferences('{"disableMergeTool": "yes"}');
+		expect(result.ok).toBe(false);
+		expect(result.errors.some((e: string) => e.includes("disableMergeTool"))).toBe(true);
 	});
 
 });
@@ -422,6 +435,14 @@ describe("DEFAULT_PREFERENCES", () => {
 	it("ciGreenMerge default includes merge request", () => {
 		expect(DEFAULT_PREFERENCES.ciGreenMerge).toContain("Please merge");
 		expect(DEFAULT_PREFERENCES.ciGreenMerge).toContain("{prLabel}");
+	});
+
+	it("disableMergeTool is a boolean, not a template string", () => {
+		expect(DEFAULT_PREFERENCES).not.toHaveProperty("disableMergeTool");
+	});
+
+	it("disableMergeTool defaults to false", () => {
+		expect(DEFAULT_DISABLE_MERGE_TOOL).toBe(false);
 	});
 });
 

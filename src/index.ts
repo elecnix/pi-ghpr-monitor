@@ -42,6 +42,7 @@ import {
 	PreferencesSchema,
 	DEFAULT_PREFERENCES,
 	DEFAULT_RETRIGGER_COMMENTS,
+	DEFAULT_DISABLE_MERGE_TOOL,
 	validatePreferences,
 	loadPreferences,
 	savePreferences,
@@ -1460,9 +1461,9 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			"Accept a GitHub PR URL, issue URL, shorthand like 'owner/repo#123', or separate owner/repo/pr_number.",
 			"Use action='status' to see all currently monitored resources.",
 			"Use action='check' to trigger an immediate poll.",
-			"Use action='merge' to toggle auto-merge when CI passes. When enabled, the monitor will notify you to merge the PR once CI turns green.",
+			"Use action='merge' to toggle auto-merge when CI passes (if not disabled by the disableMergeTool preference). When enabled, the monitor will notify you to merge the PR once CI turns green.",
 			"Use action='preferences' to view current preferences or update them with a value parameter.",
-			"The value parameter for preferences is a JSON string with keys: ignoredBots (array of strings), newComments, conflict, ciFailure, reminder, allClear, firstPoll, descriptionStaleness, prCreateNudge, ciGreenMerge, retriggerComments (boolean, default false).",
+			"The value parameter for preferences is a JSON string with keys: ignoredBots (array of strings), newComments, conflict, ciFailure, reminder, allClear, firstPoll, descriptionStaleness, prCreateNudge, ciGreenMerge, disableMergeTool (boolean, default false), retriggerComments (boolean, default false).",
 			"Template variables available in preferences: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, plus situation-specific vars like {failingChecks}, {unresolvedThreads}, {generalComments}, {conflict}, {commitOid}, {commitShortOid}, {commitUrl}, {commitAuthor}, {commitCoauthors}, {commitMessageHeadline}.",
 			"Do NOT stop monitoring on your own. Only the user can stop monitoring via /ghpr-monitor off.",
 			"Monitoring runs until the user stops it via /ghpr-monitor off, or the PR/issue is merged/closed.",
@@ -1640,6 +1641,14 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				}
 
 				case "merge": {
+					const mergeDisabled = currentPreferences.disableMergeTool ?? DEFAULT_DISABLE_MERGE_TOOL;
+					if (mergeDisabled) {
+						return {
+							content: [{ type: "text", text: "The merge tool action is disabled for the agent. The user can toggle auto-merge via /ghpr-monitor merge." }],
+							details: { action: "merge", status: "disabled" },
+						};
+					}
+
 					if (monitors.size === 0) {
 						return {
 							content: [{ type: "text", text: "No monitors are currently active. Start one first with action='start'." }],
