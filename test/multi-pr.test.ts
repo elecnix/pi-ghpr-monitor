@@ -157,7 +157,7 @@ describe("Multi-PR architecture structure", () => {
 		expect(src).toContain("interface ActiveMonitor");
 		expect(src).toContain("config: MonitorConfig");
 		expect(src).toContain("controller: AbortController");
-		expect(src).toContain("lastStatus: PRStatus | null");
+		expect(src).toContain("lastStatus: PRStatus | IssueStatus | null");
 		expect(src).toContain("lastStatusTimestamp: Date | null");
 		expect(src).toContain("backoffSec: number");
 		expect(src).toContain("consecutiveNoChange: number");

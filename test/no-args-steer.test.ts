@@ -174,7 +174,7 @@ describe("no-args branch does not regress other command handlers", () => {
 	});
 
 	it("URL/shorthand parsing is still present after no-args block", () => {
-		const afterNoArgs = src.slice(src.indexOf("// Try parsing as a PR URL first"));
+		const afterNoArgs = src.slice(src.indexOf("// Try parsing as an issue URL first"));
 		expect(afterNoArgs).toContain("parsePRUrl");
 		expect(afterNoArgs).toContain("parsePRShorthand");
 	});

@@ -183,9 +183,28 @@ export interface MonitorConfig {
 	repo: string;
 	number: number;
 	host: string;
+	resourceType: "pr" | "issue";
 	mode: "all" | "comments" | "conflicts" | "actions";
 	intervalSec: number;
 	debounceSec: number;
+}
+
+// ---------------------------------------------------------------------------
+// Issue monitoring types
+// ---------------------------------------------------------------------------
+
+export interface IssueData {
+	title: string;
+	state: string;
+	comments: { nodes: CommentNode[] };
+}
+
+export interface IssueStatus {
+	title: string;
+	state: string;
+	generalComments: number;
+	lastCommentTimestamp: string;
+	commentDetails: CommentSummary[];
 }
 
 // ---------------------------------------------------------------------------
@@ -336,6 +355,37 @@ export function parseCoauthors(message: string | null | undefined): string[] {
 		}
 	}
 	return names;
+}
+
+export function snapshotIssue(issue: IssueData, ignoredBots: string[]): IssueStatus {
+	const ignoredBotsSet = ignoredBots.length > 0 ? new Set(ignoredBots) : null;
+
+	const comments = issue.comments.nodes
+		.filter((c: CommentNode) => !isAcknowledged(c))
+		.filter((c: CommentNode) => !ignoredBotsSet?.has(c.author?.login ?? ""))
+		.map((c: CommentNode) => ({
+			id: c.id,
+			restApiId: generalCommentRestApiId(c),
+			author: c.author?.login ?? "",
+			body: firstLine(c.body, 120),
+			fullBody: c.body,
+		}));
+
+	let lastTimestamp = "";
+	for (const c of issue.comments.nodes) {
+		if (c.createdAt > lastTimestamp) lastTimestamp = c.createdAt;
+	}
+
+	return {
+		title: issue.title,
+		state: issue.state,
+		generalComments: issue.comments.nodes
+			.filter((c: CommentNode) => !isAcknowledged(c))
+			.filter((c: CommentNode) => !ignoredBotsSet?.has(c.author?.login ?? ""))
+			.length,
+		lastCommentTimestamp: lastTimestamp,
+		commentDetails: comments,
+	};
 }
 
 export function snapshotPR(pr: PullRequestData, ignoredBots: string[]): PRStatus {
@@ -811,8 +861,8 @@ export function linkifyPRRefs(text: string, defaultHost: string = "github.com", 
 	// Extract any pre-existing links of the active format
 	protectLinks();
 
-	// First pass: wrap existing full PR URLs in hyperlinks.
-	// Matches https://github.com/owner/repo/pull/123 (or any host)
+	// First pass: wrap existing full PR URLs and issue URLs in hyperlinks.
+	// Matches https://github.com/owner/repo/pull/123 and /issues/123 (or any host)
 	// Uses owner/repo#number as the display text (not the full URL) to avoid
 	// triplicating the URL in terminals that don't support OSC 8 hyperlinks.
 	// Word boundary (\b) after the number prevents trailing punctuation
@@ -820,6 +870,14 @@ export function linkifyPRRefs(text: string, defaultHost: string = "github.com", 
 	const urlPattern = /https?:\/\/([^\/\s]+)\/([^\/\s]+)\/([^\/\s]+)\/pull\/([0-9]+)\b/g;
 	text = text.replace(urlPattern, (_match, host: string, owner: string, repo: string, number: string) => {
 		const url = `https://${host}/${owner}/${repo}/pull/${number}`;
+		const label = `${owner}/${repo}#${number}`;
+		return link(url, label);
+	});
+
+	// Also linkify issue URLs with the same compact display format
+	const issueUrlPattern = /https?:\/\/([^\/\s]+)\/([^\/\s]+)\/([^\/\s]+)\/issues\/([0-9]+)\b/g;
+	text = text.replace(issueUrlPattern, (_match, host: string, owner: string, repo: string, number: string) => {
+		const url = `https://${host}/${owner}/${repo}/issues/${number}`;
 		const label = `${owner}/${repo}#${number}`;
 		return link(url, label);
 	});
@@ -866,16 +924,22 @@ export function linkifyPRRefs(text: string, defaultHost: string = "github.com", 
  * Shows the PR URL with emoji indicators for each issue type.
  * No emojis when no actionable items.
  */
-export function formatFooterStatus(config: MonitorConfig, status: PRStatus | null): string {
-	const url = `https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
-	if (!status) return `📡 ${url}`;
+export function formatFooterStatus(config: MonitorConfig, status: PRStatus | IssueStatus | null): string {
+	const isIssue = config.resourceType === "issue";
+	const resourceLabel = isIssue
+		? `https://${config.host}/${config.owner}/${config.repo}/issues/${config.number} (issue)`
+		: `https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
+
+	if (!status) return `📡 ${resourceLabel}`;
+
 	const emojis: string[] = [];
-	if (status.hasConflicts) emojis.push("⚠️");
-	if (status.unresolvedThreads > 0) emojis.push("💬");
+	if ("hasConflicts" in status && status.hasConflicts) emojis.push("⚠️");
+	if ("unresolvedThreads" in status && status.unresolvedThreads > 0) emojis.push("💬");
 	if (status.generalComments > 0) emojis.push("💭");
-	if (status.failingChecks.length > 0) emojis.push("❌");
-	if (status.pendingChecks.length > 0) emojis.push("⏳");
-	return emojis.length > 0 ? `📡 ${url} ${emojis.join("")}` : `📡 ${url}`;
+	if ("failingChecks" in status && status.failingChecks.length > 0) emojis.push("❌");
+	if ("pendingChecks" in status && status.pendingChecks.length > 0) emojis.push("⏳");
+
+	return emojis.length > 0 ? `📡 ${resourceLabel} ${emojis.join("")}` : `📡 ${resourceLabel}`;
 }
 
 // ---------------------------------------------------------------------------

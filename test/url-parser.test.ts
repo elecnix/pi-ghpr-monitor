@@ -191,3 +191,119 @@ describe("parsePRShorthand", () => {
 		expect(parsePRShorthand("v2nic/repo#abc")).toBeNull();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Issue URL parsing
+// ---------------------------------------------------------------------------
+
+const ISSUE_URL_RE = /^https?:\/\/([^\/]+)\/([^\/]+)\/([^\/]+)\/issues\/([0-9]+)/i;
+
+interface ParsedResource {
+	owner: string;
+	repo: string;
+	number: number;
+	host: string;
+	resourceType: "pr" | "issue";
+}
+
+function parseIssueUrl(input: string): ParsedResource | null {
+	const m = input.trim().match(ISSUE_URL_RE);
+	if (!m) return null;
+	const host = m[1] === "github.com" ? "github.com" : m[1];
+	return { owner: m[2], repo: m[3], number: parseInt(m[4], 10), host, resourceType: "issue" };
+}
+
+function parseResourceUrl(input: string): ParsedResource | null {
+	const issue = parseIssueUrl(input);
+	if (issue) return issue;
+
+	const prUrlMatch = input.trim().match(/^https?:\/\/([^\/]+)\/([^\/]+)\/([^\/]+)\/pull\/([0-9]+)/i);
+	if (prUrlMatch) {
+		const host = prUrlMatch[1] === "github.com" ? "github.com" : prUrlMatch[1];
+		return { owner: prUrlMatch[2], repo: prUrlMatch[3], number: parseInt(prUrlMatch[4], 10), host, resourceType: "pr" };
+	}
+
+	return null;
+}
+
+describe("parseIssueUrl", () => {
+	it("parses a standard GitHub issue URL", () => {
+		const result = parseIssueUrl("https://github.com/v2nic/pi-ghpr-monitor/issues/80");
+		expect(result).toEqual({
+			owner: "v2nic",
+			repo: "pi-ghpr-monitor",
+			number: 80,
+			host: "github.com",
+			resourceType: "issue",
+		});
+	});
+
+	it("parses an issue URL with trailing path segments", () => {
+		const result = parseIssueUrl("https://github.com/owner/repo/issues/42/");
+		expect(result).not.toBeNull();
+		expect(result?.number).toBe(42);
+		expect(result?.resourceType).toBe("issue");
+	});
+
+	it("parses an issue URL with query params", () => {
+		const result = parseIssueUrl("https://github.com/owner/repo/issues/42?foo=bar");
+		expect(result).not.toBeNull();
+		expect(result?.number).toBe(42);
+	});
+
+	it("parses a GitHub Enterprise issue URL", () => {
+		const result = parseIssueUrl("https://github.corp.com/team/project/issues/7");
+		expect(result).toEqual({
+			owner: "team",
+			repo: "project",
+			number: 7,
+			host: "github.corp.com",
+			resourceType: "issue",
+		});
+	});
+
+	it("returns null for PR URL", () => {
+		expect(parseIssueUrl("https://github.com/owner/repo/pull/42")).toBeNull();
+	});
+
+	it("returns null for non-issue URLs", () => {
+		expect(parseIssueUrl("https://github.com/owner/repo")).toBeNull();
+		expect(parseIssueUrl("not a url")).toBeNull();
+		expect(parseIssueUrl("")).toBeNull();
+	});
+
+	it("returns null for issue URL with non-numeric number", () => {
+		expect(parseIssueUrl("https://github.com/owner/repo/issues/abc")).toBeNull();
+	});
+
+	it("handles whitespace around URL", () => {
+		const result = parseIssueUrl("  https://github.com/owner/repo/issues/42  ");
+		expect(result).not.toBeNull();
+		expect(result?.number).toBe(42);
+	});
+
+	it("parses http URL", () => {
+		const result = parseIssueUrl("http://github.com/owner/repo/issues/1");
+		expect(result).not.toBeNull();
+		expect(result?.number).toBe(1);
+	});
+});
+
+describe("parseResourceUrl", () => {
+	it("returns pr for pull request URL", () => {
+		const result = parseResourceUrl("https://github.com/owner/repo/pull/42");
+		expect(result?.resourceType).toBe("pr");
+		expect(result?.number).toBe(42);
+	});
+
+	it("returns issue for issue URL", () => {
+		const result = parseResourceUrl("https://github.com/owner/repo/issues/42");
+		expect(result?.resourceType).toBe("issue");
+		expect(result?.number).toBe(42);
+	});
+
+	it("returns null for non-resource URLs", () => {
+		expect(parseResourceUrl("https://github.com/owner/repo")).toBeNull();
+		expect(parseResourceUrl("not a url")).toBeNull();
+	});
+});

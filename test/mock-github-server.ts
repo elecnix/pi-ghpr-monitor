@@ -142,6 +142,13 @@ function buildGraphQLResponse(state: MockPRState): object {
 						],
 					},
 				},
+				issue: {
+					title: "Test issue",
+					state: (state as any).state || "OPEN",
+					comments: {
+						nodes: commentNodes,
+					},
+				},
 			},
 		},
 	};
