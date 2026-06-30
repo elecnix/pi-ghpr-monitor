@@ -70,7 +70,7 @@ describe("!/start subcommand injects steer prompt", () => {
 
 describe("explicit PR arguments do NOT inject steer prompt", () => {
 	it("PR URL handler does NOT call sendStartPrompt", () => {
-		const urlHandlerIdx = src.indexOf("// Try parsing as a PR URL first");
+		const urlHandlerIdx = src.indexOf("// Try parsing as an issue URL first");
 		expect(urlHandlerIdx).toBeGreaterThan(-1);
 		const urlBlock = src.slice(urlHandlerIdx, src.indexOf("// Try parsing as \"owner/repo#number\""));
 		expect(urlBlock).not.toContain("sendStartPrompt(config)");

@@ -58,8 +58,9 @@ const AWAIT_QUERY = queryMatch[1];
  *   reactions.nodes { ... }                       → Reaction
  */
 const QUERY_FIELDS: Record<string, string[]> = {
-	Repository: ["pullRequest"],
+	Repository: ["pullRequest", "issue"],
 	PullRequest: ["state", "merged", "comments", "reviewThreads", "mergeable", "mergeStateStatus", "commits"],
+	Issue: ["title", "state", "comments"],
 	IssueComment: ["id", "databaseId", "body", "author", "createdAt", "reactions"],
 	PullRequestReviewThread: ["id", "isResolved", "comments"],
 	PullRequestReviewComment: ["id", "fullDatabaseId", "body", "author", "createdAt", "path", "line", "diffHunk", "reactions"],

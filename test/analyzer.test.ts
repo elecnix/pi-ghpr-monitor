@@ -17,11 +17,12 @@ import {
 	formatActionableItems,
 	formatFooterStatus,
 	snapshotPR,
+	snapshotIssue,
 	parseCoauthors,
 	linkifyPRRefs,
 	formatAgentNotification,
 } from "../src/analyzer";
-import type { PullRequestData, PRStatus, MonitorConfig, CommitNode, ReactionNode, ThreadSummary, CommentSummary } from "../src/analyzer";
+import type { PullRequestData, PRStatus, IssueData, IssueStatus, MonitorConfig, CommitNode, ReactionNode, ThreadSummary, CommentSummary } from "../src/analyzer";
 
 function makeMockPR(overrides: Partial<PullRequestData> = {}): PullRequestData {
 	const defaults: PullRequestData = {
@@ -1733,4 +1734,188 @@ describe("snapshotPR ignoredBots filtering (general comments only)", () => {
 		expect(status.commentDetails).toHaveLength(1);
 	});
 
+});
+
+// ---------------------------------------------------------------------------
+// Issue monitoring tests
+// ---------------------------------------------------------------------------
+
+function makeMockIssue(overrides: Partial<IssueData> = {}): IssueData {
+	const defaults: IssueData = {
+		title: "Test issue",
+		state: "OPEN",
+		comments: { nodes: [] },
+	};
+	return { ...defaults, ...overrides };
+}
+
+function makeIssueConfig(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
+	const defaults: MonitorConfig = {
+		owner: "testowner",
+		repo: "testrepo",
+		number: 42,
+		host: "github.com",
+		resourceType: "issue",
+		mode: "all",
+		intervalSec: 60,
+		debounceSec: 30,
+	};
+	return { ...defaults, ...overrides };
+}
+
+describe("snapshotIssue", () => {
+	it("returns empty status for issue with no comments", () => {
+		const issue = makeMockIssue();
+		const status = snapshotIssue(issue, []);
+		expect(status.generalComments).toBe(0);
+		expect(status.commentDetails).toHaveLength(0);
+		expect(status.state).toBe("OPEN");
+		expect(status.title).toBe("Test issue");
+	});
+
+	it("captures general comments on an issue", () => {
+		const issue = makeMockIssue({
+			comments: {
+				nodes: [
+					{ id: "IC_1", databaseId: 100, body: "Looks good", author: { login: "alice" }, createdAt: "2024-01-01T00:00:00Z" },
+					{ id: "IC_2", databaseId: 101, body: "Second", author: { login: "bob" }, createdAt: "2024-01-01T00:01:00Z" },
+				],
+			},
+		});
+		const status = snapshotIssue(issue, []);
+		expect(status.generalComments).toBe(2);
+		expect(status.commentDetails).toHaveLength(2);
+		expect(status.commentDetails[0].author).toBe("alice");
+		expect(status.commentDetails[1].author).toBe("bob");
+	});
+
+	it("filters acknowledged comments (thumbs up)", () => {
+		const issue = makeMockIssue({
+			comments: {
+				nodes: [
+					{
+						id: "IC_1", databaseId: 100, body: "Unacknowledged", author: { login: "alice" },
+						createdAt: "2024-01-01T00:00:00Z", reactions: { nodes: [] },
+					},
+					{
+						id: "IC_2", databaseId: 101, body: "Acknowledged", author: { login: "bob" },
+						createdAt: "2024-01-01T00:01:00Z",
+						reactions: { nodes: [{ content: "THUMBS_UP" }] },
+					},
+				],
+			},
+		});
+		const status = snapshotIssue(issue, []);
+		expect(status.generalComments).toBe(1);
+		expect(status.commentDetails).toHaveLength(1);
+		expect(status.commentDetails[0].author).toBe("alice");
+	});
+
+	it("filters comments from ignored bots", () => {
+		const issue = makeMockIssue({
+			comments: {
+				nodes: [
+					{ id: "IC_1", databaseId: 100, body: "Hello", author: { login: "alice" }, createdAt: "2024-01-01T00:00:00Z" },
+					{ id: "IC_2", databaseId: 101, body: "CI report", author: { login: "linear" }, createdAt: "2024-01-01T00:01:00Z" },
+				],
+			},
+		});
+		const status = snapshotIssue(issue, ["linear"]);
+		expect(status.generalComments).toBe(1);
+		expect(status.commentDetails).toHaveLength(1);
+		expect(status.commentDetails[0].author).toBe("alice");
+	});
+
+	it("captures state of the issue", () => {
+		const issue = makeMockIssue({ state: "CLOSED" });
+		const status = snapshotIssue(issue, []);
+		expect(status.state).toBe("CLOSED");
+	});
+});
+
+describe("formatFooterStatus for issues", () => {
+	it("shows issue label with comment indicator", () => {
+		const config = makeIssueConfig();
+		const status: IssueStatus = {
+			title: "Test",
+			state: "OPEN",
+			generalComments: 2,
+			lastCommentTimestamp: "2024-01-01T00:00:00Z",
+			commentDetails: [],
+		};
+		const footer = formatFooterStatus(config, status);
+		expect(footer).toContain("testowner/testrepo/issues/42");
+		expect(footer).toContain("(issue)");
+		expect(footer).toContain("💭");
+	});
+
+	it("shows no emoji when no actionable items", () => {
+		const config = makeIssueConfig();
+		const status: IssueStatus = {
+			title: "Test",
+			state: "OPEN",
+			generalComments: 0,
+			lastCommentTimestamp: "2024-01-01T00:00:00Z",
+			commentDetails: [],
+		};
+		const footer = formatFooterStatus(config, status);
+		expect(footer).toContain("(issue)");
+		expect(footer).not.toContain("💭");
+	});
+
+	it("does not show (issue) label for PR config", () => {
+		const config: MonitorConfig = {
+			owner: "testowner",
+			repo: "testrepo",
+			number: 42,
+			host: "github.com",
+			resourceType: "pr",
+			mode: "all",
+			intervalSec: 60,
+			debounceSec: 30,
+		};
+		const status: IssueStatus = {
+			title: "Test",
+			state: "OPEN",
+			generalComments: 0,
+			lastCommentTimestamp: "2024-01-01T00:00:00Z",
+			commentDetails: [],
+		};
+		const footer = formatFooterStatus(config, status);
+		expect(footer).not.toContain("(issue)");
+	});
+});
+
+describe("linkifyPRRefs with issue URLs", () => {
+	it("linkifies GitHub issue URLs", () => {
+		const input = "See https://github.com/owner/repo/issues/42 for details";
+		const result = linkifyPRRefs(input, "github.com", "osc8");
+		// The issue URL should be converted to a clickable link with display text "owner/repo#42"
+		const esc = "\x1b";
+		expect(result).toContain(`${esc}]8;;https://github.com/owner/repo/issues/42${esc}\\`);
+		expect(result).toContain("owner/repo#42");
+	});
+
+	it("linkifies issue URLs in markdown format", () => {
+		const input = "See https://github.com/owner/repo/issues/42 for details";
+		const result = linkifyPRRefs(input, "github.com", "markdown");
+		expect(result).toContain("[owner/repo#42](https://github.com/owner/repo/issues/42)");
+	});
+
+	it("does not double-linkify already linkified issue references", () => {
+		const input = linkifyPRRefs("See https://github.com/owner/repo/issues/42", "github.com", "osc8");
+		const result = linkifyPRRefs(input, "github.com", "osc8");
+		// Should be idempotent: no duplicate link
+		const esc = "\x1b";
+		const linkMatches = (result.match(new RegExp(`${esc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}]8;;https://github\\.com/owner/repo/issues/42${esc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\\\`, 'g')) || []).length;
+		expect(linkMatches).toBe(1);
+	});
+
+	it("linkifies GitHub Enterprise issue URLs", () => {
+		const input = "Tracked at https://github.corp.com/team/project/issues/7";
+		const result = linkifyPRRefs(input, "github.corp.com", "osc8");
+		const esc = "\x1b";
+		expect(result).toContain(`${esc}]8;;https://github.corp.com/team/project/issues/7${esc}\\`);
+		expect(result).toContain("team/project#7");
+	});
 });

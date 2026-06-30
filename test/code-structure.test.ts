@@ -24,7 +24,7 @@ describe("multi-PR monitoring architecture", () => {
 
 	it("defines the ActiveMonitor interface with per-monitor state", () => {
 		expect(src).toContain("interface ActiveMonitor");
-		expect(src).toContain("lastStatus: PRStatus | null");
+		expect(src).toContain("lastStatus: PRStatus | IssueStatus | null");
 		expect(src).toContain("lastStatusTimestamp: Date | null");
 		expect(src).toContain("backoffSec: number");
 		expect(src).toContain("consecutiveNoChange: number");
@@ -157,7 +157,7 @@ describe("per-monitor state isolation", () => {
 	});
 
 	it("each ActiveMonitor has its own lastStatus", () => {
-		expect(src).toMatch(/lastStatus:\s*PRStatus \| null/);
+		expect(src).toMatch(/lastStatus:\s*PRStatus \| IssueStatus \| null/);
 	});
 
 	it("each ActiveMonitor has its own pollWakeResolve", () => {

@@ -224,7 +224,7 @@ describe("Error messages must NOT leak into LLM context", () => {
 
 	it("fatal error messages use uiCtx.notify() for TUI-only display", () => {
 		// Check that the fatal error handler (startMonitor catch) uses uiCtx.notify
-		const fatalErrBlock = src.indexOf("PR monitor error for");
+		const fatalErrBlock = src.indexOf("monitor error for");
 		expect(fatalErrBlock).toBeGreaterThan(-1);
 
 		const nearby = src.slice(fatalErrBlock - 100, fatalErrBlock + 300);
