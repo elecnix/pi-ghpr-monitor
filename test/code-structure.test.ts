@@ -83,6 +83,7 @@ describe("multi-PR monitoring architecture", () => {
 		expect(actions).toContain("start");
 		expect(actions).toContain("status");
 		expect(actions).toContain("check");
+		expect(actions).toContain("merge");
 		expect(actions).not.toContain("stop"); // LLM must not be able to stop monitoring
 	});
 

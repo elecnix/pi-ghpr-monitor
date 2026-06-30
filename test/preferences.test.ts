@@ -70,10 +70,11 @@ describe("validatePreferences", () => {
 			reminder: "Still issues on {prLabel}",
 			allClear: "All clear on {prLabel}",
 			firstPoll: "Monitoring {prLabel}...",
+			ciGreenMerge: "Please merge {prLabel}",
 		});
 		const result = validatePreferences(json);
 		expect(result.ok).toBe(true);
-		expect(Object.keys(result.preferences!)).toHaveLength(6);
+		expect(Object.keys(result.preferences!)).toHaveLength(7);
 	});
 
 	it("rejects invalid JSON", () => {
@@ -381,7 +382,7 @@ describe("loadPreferences / savePreferences", () => {
 
 describe("DEFAULT_PREFERENCES", () => {
 	it("has all preference keys", () => {
-		expect(Object.keys(DEFAULT_PREFERENCES)).toHaveLength(8);
+		expect(Object.keys(DEFAULT_PREFERENCES)).toHaveLength(9);
 		expect(DEFAULT_PREFERENCES).toHaveProperty("newComments");
 		expect(DEFAULT_PREFERENCES).toHaveProperty("conflict");
 		expect(DEFAULT_PREFERENCES).toHaveProperty("ciFailure");
@@ -390,6 +391,7 @@ describe("DEFAULT_PREFERENCES", () => {
 		expect(DEFAULT_PREFERENCES).toHaveProperty("firstPoll");
 		expect(DEFAULT_PREFERENCES).toHaveProperty("descriptionStaleness");
 		expect(DEFAULT_PREFERENCES).toHaveProperty("prCreateNudge");
+		expect(DEFAULT_PREFERENCES).toHaveProperty("ciGreenMerge");
 		expect(DEFAULT_PREFERENCES).not.toHaveProperty("retriggerComments");
 	});
 
@@ -415,6 +417,11 @@ describe("DEFAULT_PREFERENCES", () => {
 
 	it("firstPoll default includes intervalSec variable", () => {
 		expect(DEFAULT_PREFERENCES.firstPoll).toContain("{intervalSec}");
+	});
+
+	it("ciGreenMerge default includes merge request", () => {
+		expect(DEFAULT_PREFERENCES.ciGreenMerge).toContain("Please merge");
+		expect(DEFAULT_PREFERENCES.ciGreenMerge).toContain("{prLabel}");
 	});
 });
 

@@ -93,6 +93,12 @@ export const PreferencesSchema = Type.Object(
 					"Prompt override for auto-detecting gh pr create output and nudging the LLM to start monitoring. Variables: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}",
 			}),
 		),
+		ciGreenMerge: Type.Optional(
+			Type.String({
+				description:
+					"Prompt override for when auto-merge is enabled and CI turns green. Variables: {owner}, {repo}, {number}, {host}, {prLabel}",
+			}),
+		),
 		retriggerComments: Type.Optional(
 			Type.Boolean({
 				description:
@@ -146,6 +152,7 @@ export const DEFAULT_PREFERENCES: Partial<Record<keyof Preferences, string | und
 	firstPoll: "📡 Monitoring {owner}/{repo}#{number}... (polling every {intervalSec}s)",
 	descriptionStaleness: undefined,
 	prCreateNudge: DEFAULT_PR_CREATE_NUDGE,
+	ciGreenMerge: "✅ CI is green on {prLabel}. Please merge the pull request.",
 };
 
 // ---------------------------------------------------------------------------
