@@ -38,6 +38,7 @@ import {
 	type Preferences,
 	PreferencesSchema,
 	DEFAULT_PREFERENCES,
+	DEFAULT_DISABLE_MERGE_TOOL,
 	validatePreferences,
 	loadPreferences,
 	savePreferences,
@@ -312,7 +313,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	// For testing: allows reducing the polling interval
 	const MOCK_INTERVAL_SECS = process.env.GHPR_MONITOR_INTERVAL_SECS ? parseInt(process.env.GHPR_MONITOR_INTERVAL_SECS, 10) : undefined;
 
-	const STEERING_PROMPT = `You have access to the ghpr-monitor tool. When the user asks you to watch or monitor a PR, use ghpr-monitor with action "start" to begin monitoring. The tool has actions: start, status, check, and preferences. Multiple PRs can be monitored simultaneously. You must NOT stop monitoring on your own — only the user can stop via /ghpr-monitor off (stops all) or /ghpr-monitor off <PR> (stops specific). The user can also run /ghpr-monitor check to trigger an immediate poll (all PRs or a specific one). You will receive PR status updates as notifications. The url parameter accepts GitHub PR URLs or shorthand like "owner/repo#123". Use action='preferences' to view or customize the notification prompts. Calling with no value shows current preferences (with defaults); providing a value in JSON writes new preferences. Set a key to null to reset it to default.`;
+	const STEERING_PROMPT = `You have access to the ghpr-monitor tool. When the user asks you to watch or monitor a PR, use ghpr-monitor with action "start" to begin monitoring. The tool has actions: start, status, check, merge, and preferences. Multiple PRs can be monitored simultaneously. You must NOT stop monitoring on your own — only the user can stop via /ghpr-monitor off (stops all) or /ghpr-monitor off <PR> (stops specific). The user can also run /ghpr-monitor check to trigger an immediate poll (all PRs or a specific one). You will receive PR status updates as notifications. The url parameter accepts GitHub PR URLs or shorthand like "owner/repo#123". Use action='preferences' to view or customize the notification prompts. Calling with no value shows current preferences (with defaults); providing a value in JSON writes new preferences. Set a key to null to reset it to default. Use action='merge' to toggle auto-merge when CI passes (the monitor will notify you to merge the PR once CI is green).`;
 
 	// Register a custom message renderer for "ghpr-monitor" messages.
 	// This renders only the concise summary in the TUI, while the agent
@@ -858,7 +859,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		const lines: string[] = [];
 		for (const mon of monitors.values()) {
 			const c = mon.config;
-			const header = `Monitoring https://${c.host}/${c.owner}/${c.repo}/pull/${c.number} (mode: ${c.mode}, interval: ${c.intervalSec}s)`;
+			const autoMergeTag = c.autoMerge ? " 🔀auto-merge" : "";
+			const header = `Monitoring https://${c.host}/${c.owner}/${c.repo}/pull/${c.number} (mode: ${c.mode}, interval: ${c.intervalSec}s${autoMergeTag})`;
 			if (!mon.lastStatus) {
 				lines.push(`${header}\n  No status update received yet.`);
 			} else {
@@ -983,6 +985,47 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				return;
 			}
 
+			// Parse: merge [PR identifier] — toggle auto-merge when CI passes
+			if (raw.toLowerCase() === "merge" || raw.toLowerCase().startsWith("merge ")) {
+				const rest = raw.replace(/^merge\s*/i, "").trim();
+				if (!rest) {
+					// No argument: if exactly one PR monitored, toggle it; otherwise show status
+					if (monitors.size === 1) {
+						const [key, mon] = [...monitors.entries()][0]!;
+						mon.config.autoMerge = !mon.config.autoMerge;
+						ctx.ui.notify(
+							`Auto-merge ${mon.config.autoMerge ? "enabled" : "disabled"} for ${key}.${mon.config.autoMerge ? " The monitor will notify to merge when CI passes." : ""}`,
+							"info",
+						);
+						return;
+					}
+					const autoMergeMonitors = [...monitors.entries()]
+						.filter(([, mon]) => mon.config.autoMerge);
+					if (autoMergeMonitors.length === 0) {
+						ctx.ui.notify(
+							"No monitors have auto-merge enabled.\n  Toggle with: /ghpr-monitor merge <PR>\n  When CI passes, the monitor will notify to merge.",
+							"info",
+						);
+					} else {
+						const lines = autoMergeMonitors.map(([key]) => `  ${key}: auto-merge ON`);
+						ctx.ui.notify(`Auto-merge enabled on:\n${lines.join("\n")}`, "info");
+					}
+					return;
+				}
+				const targetKey = resolveMonitorKey(rest);
+				if (targetKey && monitors.has(targetKey)) {
+					const mon = monitors.get(targetKey)!;
+					mon.config.autoMerge = !mon.config.autoMerge;
+					ctx.ui.notify(
+						`Auto-merge ${mon.config.autoMerge ? "enabled" : "disabled"} for ${targetKey}.${mon.config.autoMerge ? " The monitor will notify to merge when CI passes." : ""}`,
+						"info",
+					);
+				} else {
+					ctx.ui.notify(`Unknown PR: ${rest}. Currently monitoring: ${[...monitors.keys()].join(", ") || "none"}`, "warning");
+				}
+				return;
+			}
+
 			if (raw.toLowerCase() === "on" || raw === "") {
 				if (monitors.size > 0) {
 					const statusText = formatCurrentStatus();
@@ -1079,7 +1122,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			}
 
 			ctx.ui.notify(
-				"Usage:\n  /ghpr-monitor ! | start — monitor current branch's PR (injects prompt for LLM)\n  /ghpr-monitor <PR URL> — paste a GH PR URL (TUI-only, no LLM turn)\n  /ghpr-monitor owner/repo#123\n  /ghpr-monitor owner/repo <pr-number> [message]\n  /ghpr-monitor check [PR] — check now (all or specific)\n  /ghpr-monitor off [PR] — stop monitoring (all or specific)",
+				"Usage:\n  /ghpr-monitor ! | start — monitor current branch's PR (injects prompt for LLM)\n  /ghpr-monitor <PR URL> — paste a GH PR URL (TUI-only, no LLM turn)\n  /ghpr-monitor owner/repo#123\n  /ghpr-monitor owner/repo <pr-number> [message]\n  /ghpr-monitor check [PR] — check now (all or specific)\n  /ghpr-monitor merge [PR] — toggle auto-merge when CI passes\n  /ghpr-monitor off [PR] — stop monitoring (all or specific)",
 				"info",
 			);
 		},
@@ -1115,7 +1158,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	// -----------------------------------------------------------------------
 
 	const GhprMonitorParams = Type.Object({
-		action: Type.Union([Type.Literal("start"), Type.Literal("status"), Type.Literal("check"), Type.Literal("preferences")]),
+		action: Type.Union([Type.Literal("start"), Type.Literal("status"), Type.Literal("check"), Type.Literal("merge"), Type.Literal("preferences")]),
 		url: Type.Optional(Type.String({ description: "GitHub PR URL (e.g. https://github.com/owner/repo/pull/123) or shorthand (e.g. owner/repo#123). Alternative to owner+repo+pr_number." })),
 		owner: Type.Optional(Type.String({ description: "Repository owner (e.g. 'v2nic')" })),
 		repo: Type.Optional(Type.String({ description: "Repository name (e.g. 'gh-pr-review')" })),
@@ -1137,8 +1180,9 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			"Accept a GitHub PR URL, shorthand like 'owner/repo#123', or separate owner/repo/pr_number.",
 			"Use action='status' to see all currently monitored PRs.",
 			"Use action='check' to trigger an immediate poll.",
+			"Use action='merge' to toggle auto-merge when CI passes (if not disabled by disableMergeTool preference). When enabled, the monitor will notify you to merge the PR once CI turns green.",
 			"Use action='preferences' to view current preferences or update them with a value parameter.",
-			"The value parameter for preferences is a JSON string with keys: ignoredBots (array of strings), newComments, conflict, ciFailure, reminder, allClear, firstPoll, descriptionStaleness, prCreateNudge.",
+			"The value parameter for preferences is a JSON string with keys: ignoredBots (array of strings), newComments, conflict, ciFailure, reminder, allClear, firstPoll, descriptionStaleness, prCreateNudge, ciGreenMerge, disableMergeTool (boolean, default false).",
 			"Template variables available in preferences: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, plus situation-specific vars like {failingChecks}, {unresolvedThreads}, {generalComments}, {conflict}, {commitOid}, {commitShortOid}, {commitUrl}.",
 			"Do NOT stop monitoring on your own. Only the user can stop monitoring via /ghpr-monitor off.",
 			"Monitoring runs until the user stops it via /ghpr-monitor off, or the PR is merged/closed.",
@@ -1299,6 +1343,49 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					return {
 						content: [{ type: "text", text: `Checking all ${monitors.size} monitor(s)...` }],
 						details: { action: "check", status: "triggered_all", activeMonitors: monitors.size },
+					};
+				}
+
+				case "merge": {
+					const mergeDisabled = currentPreferences.disableMergeTool ?? DEFAULT_DISABLE_MERGE_TOOL;
+					if (mergeDisabled) {
+						return {
+							content: [{ type: "text", text: "The merge tool action is disabled for the agent. The user can toggle auto-merge via /ghpr-monitor merge." }],
+							details: { action: "merge", status: "disabled" },
+						};
+					}
+
+					if (monitors.size === 0) {
+						return {
+							content: [{ type: "text", text: "No monitors are currently active. Start one first with action='start'." }],
+							details: { action: "merge", status: "idle" },
+						};
+					}
+
+					const resolved = resolvePR();
+					if ("error" in resolved) {
+						return {
+							content: [{ type: "text", text: resolved.error }],
+							details: { action: "merge", status: "missing_params" },
+						};
+					}
+
+					const key = prKey(resolved.owner, resolved.repo, resolved.number, resolved.host);
+					const mon = monitors.get(key);
+					if (!mon) {
+						return {
+							content: [{ type: "text", text: `Not monitoring ${key}. Currently monitoring: ${[...monitors.keys()].join(", ")}` }],
+							details: { action: "merge", status: "not_found" },
+						};
+					}
+
+					mon.config.autoMerge = !mon.config.autoMerge;
+					const msg = mon.config.autoMerge
+						? `Auto-merge enabled for ${key}. The monitor will notify you to merge when CI passes.`
+						: `Auto-merge disabled for ${key}.`;
+					return {
+						content: [{ type: "text", text: msg }],
+						details: { action: "merge", status: "toggled", autoMerge: mon.config.autoMerge, config: mon.config },
 					};
 				}
 
