@@ -24,7 +24,7 @@ import {
 	type Preferences,
 	type TemplateVars,
 } from "../src/preferences";
-import type { PRStatus } from "../src/analyzer";
+import type { ThreadSummary, CommentSummary, CheckSummary } from "../src/analyzer";
 
 // ---------------------------------------------------------------------------
 // Helper: create a temp dir for preferences testing
@@ -405,7 +405,6 @@ describe("DEFAULT_PREFERENCES", () => {
 		expect(DEFAULT_PREFERENCES).toHaveProperty("descriptionStaleness");
 		expect(DEFAULT_PREFERENCES).toHaveProperty("prCreateNudge");
 		expect(DEFAULT_PREFERENCES).toHaveProperty("ciGreenMerge");
-		expect(DEFAULT_PREFERENCES).not.toHaveProperty("retriggerComments");
 	});
 
 	it("non-undefined defaults contain template variables", () => {
@@ -516,11 +515,10 @@ describe("preferences in notification formatting", () => {
 		pendingChecks: [] as string[],
 		lastCommentTimestamp: "",
 		lastCommentBySelf: false,
-		lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
-		lastCommitMessageHeadline: "",
-		threadDetails: [] as unknown[],
-		commentDetails: [] as unknown[],
-		checkDetails: [] as unknown[],
+		lastCommitOid: "",
+		threadDetails: [] as ThreadSummary[],
+		commentDetails: [] as CommentSummary[],
+		checkDetails: [] as CheckSummary[],
 	};
 
 	it("formatActionableItems uses preference for conflict", async () => {
@@ -684,6 +682,7 @@ describe("preferences in notification formatting", () => {
 			number: 37,
 			host: "github.com",
 			prLabel: "v2nic/pi-ghpr-monitor#37",
+			prUrl: "https://github.com/v2nic/pi-ghpr-monitor/pull/37",
 		});
 		expect(result).toBe("New push to v2nic/pi-ghpr-monitor#37 (v2nic/pi-ghpr-monitor#37) on github.com");
 	});
@@ -712,68 +711,6 @@ describe("preferences in notification formatting", () => {
 		);
 	});
 
-	it("interpolateTemplate substitutes {commitAuthor}", () => {
-		const result = interpolateTemplate(
-			"\u{1F4DD} New commit {commitShortOid} pushed to {prLabel} by {commitAuthor}",
-			{
-				owner: "v2nic",
-				repo: "pi-ghpr-monitor",
-				number: 37,
-				host: "github.com",
-				prLabel: "v2nic/pi-ghpr-monitor#37",
-				prUrl: "https://github.com/v2nic/pi-ghpr-monitor/pull/37",
-				commitShortOid: "abc1234",
-				commitAuthor: "ada",
-			},
-		);
-		expect(result).toBe(
-			"\u{1F4DD} New commit abc1234 pushed to v2nic/pi-ghpr-monitor#37 by ada",
-		);
-	});
-
-	it("interpolateTemplate substitutes {commitCoauthors}", () => {
-		const result = interpolateTemplate(
-			"Pushed to {prLabel} by {commitAuthor} (co-authored by {commitCoauthors})",
-			{
-				owner: "v2nic",
-				repo: "pi-ghpr-monitor",
-				number: 37,
-				host: "github.com",
-				prLabel: "v2nic/pi-ghpr-monitor#37",
-				prUrl: "https://github.com/v2nic/pi-ghpr-monitor/pull/37",
-				commitAuthor: "ada",
-				commitCoauthors: "Bob, Carol",
-			},
-		);
-		expect(result).toBe(
-			"Pushed to v2nic/pi-ghpr-monitor#37 by ada (co-authored by Bob, Carol)",
-		);
-	});
-
-	it("interpolateTemplate leaves {commitCoauthors} untouched when not provided", () => {
-		const result = interpolateTemplate("Pushed to {prLabel} (co-authored by {commitCoauthors})", {
-			owner: "v2nic",
-			repo: "pi-ghpr-monitor",
-			number: 37,
-			host: "github.com",
-			prLabel: "v2nic/pi-ghpr-monitor#37",
-			prUrl: "https://github.com/v2nic/pi-ghpr-monitor/pull/37",
-		});
-		expect(result).toBe("Pushed to v2nic/pi-ghpr-monitor#37 (co-authored by {commitCoauthors})");
-	});
-
-	it("interpolateTemplate leaves {commitAuthor} untouched when not provided", () => {
-		const result = interpolateTemplate("Pushed to {prLabel} by {commitAuthor}", {
-			owner: "v2nic",
-			repo: "pi-ghpr-monitor",
-			number: 37,
-			host: "github.com",
-			prLabel: "v2nic/pi-ghpr-monitor#37",
-			prUrl: "https://github.com/v2nic/pi-ghpr-monitor/pull/37",
-		});
-		expect(result).toBe("Pushed to v2nic/pi-ghpr-monitor#37 by {commitAuthor}");
-	});
-
 	it("interpolateTemplate leaves commit placeholders untouched when not provided", () => {
 		// In contexts where no commit data is available (e.g. ciFailure prompt),
 		// commit placeholders should be left as-is rather than substituted with
@@ -799,340 +736,5 @@ describe("preferences in notification formatting", () => {
 		);
 		expect(result.ok).toBe(true);
 		expect(result.preferences?.descriptionStaleness).toContain("{commitShortOid}");
-	});
-});
-
-// ---------------------------------------------------------------------------
-// retriggerComments preference — prev-based deduplication in reminders/nudges
-// ---------------------------------------------------------------------------
-
-describe("retriggerComments preference (prev filtering)", () => {
-	const config = {
-		owner: "v2nic",
-		repo: "pi-ghpr-monitor",
-		number: 32,
-		host: "github.com",
-		mode: "all" as const,
-		intervalSec: 60,
-		debounceSec: 30,
-	};
-
-	const makeStatus = (overrides: Partial<PRStatus> = {}): PRStatus => ({
-		unresolvedThreads: 0,
-		generalComments: 0,
-		hasConflicts: false,
-		failingChecks: [] as string[],
-		pendingChecks: [] as string[],
-		lastCommentTimestamp: "",
-		lastCommentBySelf: false,
-		lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
-		lastCommitMessageHeadline: "",
-		threadDetails: [] as any[],
-		commentDetails: [] as any[],
-		checkDetails: [] as any[],
-		...overrides,
-	});
-
-	it("formatActionableItems with prev filters unchanged threads", async () => {
-		const { formatActionableItems } = await import("../src/analyzer");
-		const prev = makeStatus({
-			unresolvedThreads: 2,
-			threadDetails: [
-				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix this" }] },
-				{ id: "t2", isResolved: false, lastCommentAuthor: "bob", lastCommentBody: "also this", allComments: [{ id: "c2", author: "bob", restApiId: "2", body: "also this" }] },
-			],
-		});
-		const curr = makeStatus({
-			unresolvedThreads: 2,
-			threadDetails: [
-				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix this" }] },
-				{ id: "t2", isResolved: false, lastCommentAuthor: "bob", lastCommentBody: "also this", allComments: [{ id: "c2", author: "bob", restApiId: "2", body: "also this" }] },
-			],
-		});
-
-		// Without prev: should report 2 threads
-		const resultNoPrev = formatActionableItems(curr, config);
-		expect(resultNoPrev).toContain("2 unresolved review thread");
-
-		// With prev: should be null (no new threads)
-		const resultWithPrev = formatActionableItems(curr, config, {}, prev);
-		expect(resultWithPrev).toBeNull();
-	});
-
-	it("formatActionableItems with prev reports only new threads", async () => {
-		const { formatActionableItems } = await import("../src/analyzer");
-		const prev = makeStatus({
-			unresolvedThreads: 1,
-			threadDetails: [
-				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix this" }] },
-			],
-		});
-		const curr = makeStatus({
-			unresolvedThreads: 2,
-			threadDetails: [
-				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix this" }] },
-				{ id: "t2", isResolved: false, lastCommentAuthor: "bob", lastCommentBody: "new thing", allComments: [{ id: "c2b", author: "bob", restApiId: "2", body: "new thing" }] },
-			],
-		});
-
-		// Without prev: should report 2 threads
-		const resultNoPrev = formatActionableItems(curr, config);
-		expect(resultNoPrev).toContain("2 unresolved review thread");
-
-		// With prev: should report only the new thread
-		const resultWithPrev = formatActionableItems(curr, config, {}, prev);
-		expect(resultWithPrev).toContain("1 new review thread(s)");
-		expect(resultWithPrev).toContain("(2 total)");
-		expect(resultWithPrev).not.toContain("alice");
-		expect(resultWithPrev).toContain("bob");
-	});
-
-	it("formatActionableItems with prev filters unchanged general comments", async () => {
-		const { formatActionableItems } = await import("../src/analyzer");
-		const prev = makeStatus({
-			generalComments: 3,
-			commentDetails: [
-				{ id: "c1", restApiId: "1", author: "alice", body: "looks good" },
-				{ id: "c2", restApiId: "2", author: "bob", body: "+1" },
-				{ id: "c3", restApiId: "3", author: "carol", body: "ship it" },
-			],
-		});
-		const curr = makeStatus({
-			generalComments: 3,
-			commentDetails: [
-				{ id: "c1", restApiId: "1", author: "alice", body: "looks good" },
-				{ id: "c2", restApiId: "2", author: "bob", body: "+1" },
-				{ id: "c3", restApiId: "3", author: "carol", body: "ship it" },
-			],
-		});
-
-		// Without prev: should report 3 comments
-		const resultNoPrev = formatActionableItems(curr, config);
-		expect(resultNoPrev).toContain("3 general comment");
-
-		// With prev: should be null (no new comments)
-		const resultWithPrev = formatActionableItems(curr, config, {}, prev);
-		expect(resultWithPrev).toBeNull();
-	});
-
-	it("formatActionableItems with prev reports only new general comments", async () => {
-		const { formatActionableItems } = await import("../src/analyzer");
-		const prev = makeStatus({
-			generalComments: 3,
-			commentDetails: [
-				{ id: "c1", restApiId: "1", author: "alice", body: "looks good" },
-				{ id: "c2", restApiId: "2", author: "bob", body: "+1" },
-				{ id: "c3", restApiId: "3", author: "carol", body: "ship it" },
-			],
-		});
-		const curr = makeStatus({
-			generalComments: 4,
-			commentDetails: [
-				{ id: "c1", restApiId: "1", author: "alice", body: "looks good" },
-				{ id: "c2", restApiId: "2", author: "bob", body: "+1" },
-				{ id: "c3", restApiId: "3", author: "carol", body: "ship it" },
-				{ id: "c4", restApiId: "4", author: "dave", body: "one more thing" },
-			],
-		});
-
-		// With prev: should report only the new comment
-		const resultWithPrev = formatActionableItems(curr, config, {}, prev);
-		expect(resultWithPrev).toContain("1 new general comment");
-		expect(resultWithPrev).not.toContain("alice");
-		expect(resultWithPrev).not.toContain("bob");
-		expect(resultWithPrev).not.toContain("carol");
-		expect(resultWithPrev).toContain("dave");
-	});
-
-	it("formatActionableItems with prev still reports conflicts and CI failures", async () => {
-		const { formatActionableItems } = await import("../src/analyzer");
-		const prev = makeStatus({ hasConflicts: false, failingChecks: [] });
-		const curr = makeStatus({
-			hasConflicts: true,
-			failingChecks: ["ci/test"],
-			checkDetails: [{ name: "ci/test", conclusion: "FAILURE" }],
-		});
-
-		const result = formatActionableItems(curr, config, {}, prev);
-		expect(result).toContain("Merge conflicts detected");
-		expect(result).toContain("Failing CI checks");
-	});
-
-	it("formatActionableItems with prev returns null when only unchanged conflicts exist", async () => {
-		const { formatActionableItems } = await import("../src/analyzer");
-		const prev = makeStatus({ hasConflicts: true });
-		const curr = makeStatus({ hasConflicts: true });
-
-		// Without prev: conflicts are always reported
-		const resultNoPrev = formatActionableItems(curr, config);
-		expect(resultNoPrev).toContain("Merge conflicts detected");
-
-		// With prev: unchanged conflicts are still reported (they're important)
-		const resultWithPrev = formatActionableItems(curr, config, {}, prev);
-		expect(resultWithPrev).toContain("Merge conflicts detected");
-	});
-
-	it("formatActionableItems with prev and reminder preference skips when nothing new", async () => {
-		const { formatActionableItems } = await import("../src/analyzer");
-		const prev = makeStatus({
-			unresolvedThreads: 1,
-			threadDetails: [
-				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix this" }] },
-			],
-		});
-		const curr = makeStatus({
-			unresolvedThreads: 1,
-			threadDetails: [
-				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix this" }] },
-			],
-		});
-
-		// With reminder pref and no new items: should return null
-		const result = formatActionableItems(curr, config, { reminder: "⏰ {prLabel} needs attention" }, prev);
-		expect(result).toBeNull();
-	});
-
-	it("formatActionableItems with prev and reminder preference fires when new threads appear", async () => {
-		const { formatActionableItems } = await import("../src/analyzer");
-		const prev = makeStatus({
-			unresolvedThreads: 0,
-			threadDetails: [],
-		});
-		const curr = makeStatus({
-			unresolvedThreads: 1,
-			threadDetails: [
-				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix this" }] },
-			],
-		});
-
-		const result = formatActionableItems(curr, config, { reminder: "⏰ {prLabel} needs attention" }, prev);
-		expect(result).toBe("⏰ v2nic/pi-ghpr-monitor#32 needs attention");
-	});
-
-	it("validatePreferences accepts retriggerComments boolean", () => {
-		const result = validatePreferences(JSON.stringify({ retriggerComments: true }));
-		expect(result.ok).toBe(true);
-		expect(result.preferences?.retriggerComments).toBe(true);
-	});
-
-	it("validatePreferences accepts retriggerComments as false", () => {
-		const result = validatePreferences(JSON.stringify({ retriggerComments: false }));
-		expect(result.ok).toBe(true);
-		expect(result.preferences?.retriggerComments).toBe(false);
-	});
-
-	it("validatePreferences rejects non-boolean retriggerComments", () => {
-		const result = validatePreferences(JSON.stringify({ retriggerComments: "yes" }));
-		expect(result.ok).toBe(false);
-	});
-
-	it("thread with new reply (same id) is NOT filtered out", async () => {
-		const { formatActionableItems } = await import("../src/analyzer");
-		// Thread t1 had one comment in prev (c1), now has two (c1 + c2)
-		const prev = makeStatus({
-			unresolvedThreads: 1,
-			threadDetails: [{
-				id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix this",
-				allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix this" }],
-			}],
-		});
-		const curr = makeStatus({
-			unresolvedThreads: 1,
-			threadDetails: [{
-				id: "t1", isResolved: false, lastCommentAuthor: "bob", lastCommentBody: "I pushed a fix",
-				allComments: [
-					{ id: "c1", author: "alice", restApiId: "1", body: "fix this" },
-					{ id: "c2", author: "bob", restApiId: "2", body: "I pushed a fix" },
-				],
-			}],
-		});
-
-		// With prev: the new reply on thread t1 should NOT be filtered
-		const result = formatActionableItems(curr, config, {}, prev);
-		expect(result).not.toBeNull();
-		expect(result).toContain("1 unresolved review thread");
-		expect(result).toContain("bob");
-	});
-
-	it("reminder template uses full counts when only CI is new", async () => {
-		const { formatActionableItems } = await import("../src/analyzer");
-		const prev = makeStatus({
-			unresolvedThreads: 5,
-			failingChecks: [],
-			threadDetails: [
-				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix" }] },
-			],
-		});
-		const curr = makeStatus({
-			unresolvedThreads: 5,
-			failingChecks: ["ci/test"],
-			checkDetails: [{ name: "ci/test", conclusion: "FAILURE" }],
-			threadDetails: [
-				{ id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix", allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix" }] },
-			],
-		});
-
-		// With reminder pref and prev: CI fires, template should say 5 threads (not 0)
-		const result = formatActionableItems(curr, config, {
-			reminder: "You have {unresolvedThreads} unresolved threads on {prLabel}",
-		}, prev);
-		expect(result).toBe("You have 5 unresolved threads on v2nic/pi-ghpr-monitor#32");
-	});
-
-	it("formatAgentNotification with prev filters detailed blocks", async () => {
-		const { formatAgentNotification } = await import("../src/analyzer");
-		const prev = makeStatus({
-			unresolvedThreads: 1,
-			generalComments: 1,
-			threadDetails: [{
-				id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "old",
-				allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "old" }],
-			}],
-			commentDetails: [
-				{ id: "gc1", restApiId: "10", author: "carol", body: "seen this" },
-			],
-		});
-		const curr = makeStatus({
-			unresolvedThreads: 1,
-			generalComments: 2,
-			threadDetails: [{
-				id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "old",
-				allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "old" }],
-			}],
-			commentDetails: [
-				{ id: "gc1", restApiId: "10", author: "carol", body: "seen this" },
-				{ id: "gc2", restApiId: "11", author: "dave", body: "new comment" },
-			],
-		});
-
-		const result = formatAgentNotification(curr, config, {}, prev);
-		expect(result).not.toBeNull();
-		// The detailed section should only mention the NEW comment (gc2), not the old one (gc1)
-		expect(result!.detailed).toContain("gc2");
-		expect(result!.detailed).not.toContain("gc1");
-		// The concise should mention the new comment
-		expect(result!.concise).toContain("1 new general comment");
-	});
-
-	it("formatAgentNotification without prev includes all detailed blocks", async () => {
-		const { formatAgentNotification } = await import("../src/analyzer");
-		const curr = makeStatus({
-			unresolvedThreads: 1,
-			generalComments: 2,
-			threadDetails: [{
-				id: "t1", isResolved: false, lastCommentAuthor: "alice", lastCommentBody: "fix",
-				allComments: [{ id: "c1", author: "alice", restApiId: "1", body: "fix" }],
-			}],
-			commentDetails: [
-				{ id: "gc1", restApiId: "10", author: "carol", body: "first" },
-				{ id: "gc2", restApiId: "11", author: "dave", body: "second" },
-			],
-		});
-
-		const result = formatAgentNotification(curr, config);
-		expect(result).not.toBeNull();
-		// Without prev: all items should appear
-		expect(result!.detailed).toContain("gc1");
-		expect(result!.detailed).toContain("gc2");
 	});
 });

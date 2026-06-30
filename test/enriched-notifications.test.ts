@@ -101,7 +101,7 @@ describe("snapshotPR enriches ThreadSummary and CommentSummary", () => {
 		expect(status.unresolvedThreads).toBe(1);
 		expect(status.threadDetails).toHaveLength(1);
 
-		const thread = status.threadDetails[0];
+		const thread = status.threadDetails![0];
 		expect(thread.id).toBe("PRRT_1");
 		// Truncated for TUI display
 		expect(thread.lastCommentBody).toBe("First line of comment");
@@ -137,9 +137,9 @@ describe("snapshotPR enriches ThreadSummary and CommentSummary", () => {
 		expect(status.generalComments).toBe(1);
 		expect(status.commentDetails).toHaveLength(1);
 		// Truncated for TUI
-		expect(status.commentDetails[0].body).toBe("This is a long comment");
+		expect(status.commentDetails![0].body).toBe("This is a long comment");
 		// Full body for agent
-		expect(status.commentDetails[0].fullBody).toBe("This is a long comment\nwith multiple lines\nand details");
+		expect(status.commentDetails![0].fullBody).toBe("This is a long comment\nwith multiple lines\nand details");
 	});
 
 	it("uses first comment's path/line for the thread's path/line", () => {
@@ -179,7 +179,7 @@ describe("snapshotPR enriches ThreadSummary and CommentSummary", () => {
 		});
 
 		const status = snapshotPR(pr, []);
-		const thread = status.threadDetails[0];
+		const thread = status.threadDetails![0];
 		expect(thread.path).toBe("backend/package.json");
 		expect(thread.line).toBe(39);
 		// allComments includes both comments
@@ -215,8 +215,8 @@ describe("snapshotPR enriches ThreadSummary and CommentSummary", () => {
 		});
 
 		const status = snapshotPR(pr, []);
-		expect(status.threadDetails[0].path).toBeUndefined();
-		expect(status.threadDetails[0].line).toBeUndefined();
+		expect(status.threadDetails![0].path).toBeUndefined();
+		expect(status.threadDetails![0].line).toBeUndefined();
 	});
 
 	it("truncates long single-line comment bodies for TUI display", () => {
@@ -247,7 +247,7 @@ describe("snapshotPR enriches ThreadSummary and CommentSummary", () => {
 		});
 
 		const status = snapshotPR(pr, []);
-		const thread = status.threadDetails[0];
+		const thread = status.threadDetails![0];
 		// TUI body is truncated to 120 chars + ellipsis
 		expect(thread.lastCommentBody).toContain("…");
 		expect(thread.lastCommentBody.length).toBeLessThan(longBody.length);
@@ -868,7 +868,7 @@ describe("snapshotPR maps diffHunk from GraphQL to CommentSummary", () => {
 
 		const status = snapshotPR(pr, []);
 		expect(status.threadDetails).toHaveLength(1);
-		const thread = status.threadDetails[0];
+		const thread = status.threadDetails![0];
 		expect(thread.allComments).toHaveLength(1);
 		expect(thread.allComments![0].diffHunk).toBe("@@ -40,7 +40,7 @@\n export function login() {\n-  const token = getOldToken();\n+  const token = getToken();\n   return token;\n }");
 	});
@@ -898,7 +898,7 @@ describe("snapshotPR maps diffHunk from GraphQL to CommentSummary", () => {
 		});
 
 		const status = snapshotPR(pr, []);
-		const thread = status.threadDetails[0];
+		const thread = status.threadDetails![0];
 		expect(thread.allComments![0].diffHunk).toBeUndefined();
 	});
 
@@ -920,7 +920,7 @@ describe("snapshotPR maps diffHunk from GraphQL to CommentSummary", () => {
 
 		const status = snapshotPR(pr, []);
 		expect(status.commentDetails).toHaveLength(1);
-		expect((status.commentDetails[0] as any).diffHunk).toBeUndefined();
+		expect((status.commentDetails![0] as any).diffHunk).toBeUndefined();
 	});
 });
 
