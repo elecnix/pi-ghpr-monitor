@@ -39,6 +39,7 @@ function makeMockPR(overrides: Partial<PullRequestData> = {}): PullRequestData {
 	const defaults: PullRequestData = {
 		comments: { nodes: [] },
 		reviewThreads: { nodes: [] },
+		reviews: { nodes: [] },
 		mergeable: "MERGEABLE",
 		mergeStateStatus: "CLEAN",
 		state: "OPEN",

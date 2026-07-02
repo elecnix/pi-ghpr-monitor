@@ -75,6 +75,14 @@ export interface GitActorNode {
 	user: { login: string } | null;
 }
 
+export interface ReviewNode {
+	id: string;
+	/** Review decision: APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED, PENDING */
+	state: string;
+	author: { login: string };
+	submittedAt: string;
+}
+
 export interface CommitNode {
 	commit: {
 		oid: string;
@@ -94,6 +102,7 @@ export interface CommitNode {
 export interface PullRequestData {
 	comments: { nodes: CommentNode[] };
 	reviewThreads: { nodes: ReviewThreadNode[] };
+	reviews: { nodes: ReviewNode[] };
 	mergeable: string;
 	mergeStateStatus: string;
 	state: string;
@@ -164,6 +173,10 @@ export interface PRStatus {
 	/** First line of the latest commit's message. Empty string when no
 	 *  commit or no headline is available. */
 	lastCommitMessageHeadline: string;
+	/** Latest non-PENDING review decision. Empty string when no review or all PENDING. */
+	reviewDecision?: string;
+	/** Author login of the latest review. Empty string when no review. */
+	reviewAuthor?: string;
 	// Detail for enriched notifications
 	threadDetails?: ThreadSummary[];
 	commentDetails?: CommentSummary[];
@@ -302,6 +315,41 @@ export function pendingStatuses(pr: PullRequestData): string[] {
 		}
 	}
 	return [...pending];
+}
+
+/**
+ * Extract the latest non-PENDING review decision from a PR.
+ * Returns the state from the most recently submitted review whose state
+ * is not PENDING. Returns empty string when there are no reviews or all
+ * reviews are PENDING (not yet submitted).
+ */
+export function getReviewDecision(pr: PullRequestData): string {
+	const reviews = pr.reviews.nodes;
+	if (reviews.length === 0) return "";
+
+	// Reviews are returned in order; find the latest non-PENDING one
+	for (let i = reviews.length - 1; i >= 0; i--) {
+		if (reviews[i]!.state !== "PENDING") {
+			return reviews[i]!.state;
+		}
+	}
+	return "";
+}
+
+/**
+ * Extract the author login of the latest non-PENDING review.
+ * Returns empty string when there are no reviews or all are PENDING.
+ */
+export function getReviewAuthor(pr: PullRequestData): string {
+	const reviews = pr.reviews.nodes;
+	if (reviews.length === 0) return "";
+
+	for (let i = reviews.length - 1; i >= 0; i--) {
+		if (reviews[i]!.state !== "PENDING") {
+			return reviews[i]!.author?.login ?? "";
+		}
+	}
+	return "";
 }
 
 export function getLatestCommentTimestamp(pr: PullRequestData): string {
@@ -472,6 +520,9 @@ export function snapshotPR(pr: PullRequestData, ignoredBots: string[]): PRStatus
 	const lastCommitCoauthors = parseCoauthors(latestCommit?.messageBody).join(", ");
 	// Commit subject line (first line of the commit message).
 	const lastCommitMessageHeadline = latestCommit?.messageHeadline ?? "";
+	// Latest review decision (non-PENDING only)
+	const reviewDecision = getReviewDecision(pr);
+	const reviewAuthor = getReviewAuthor(pr);
 
 	return {
 		unresolvedThreads: countUnresolvedThreads(pr),
@@ -488,6 +539,8 @@ export function snapshotPR(pr: PullRequestData, ignoredBots: string[]): PRStatus
 		lastCommitAuthor,
 		lastCommitCoauthors,
 		lastCommitMessageHeadline,
+		reviewDecision,
+		reviewAuthor,
 		threadDetails: threads,
 		commentDetails: comments,
 		checkDetails: checks,
@@ -610,6 +663,34 @@ export function formatStatusUpdate(prev: PRStatus | null, curr: PRStatus, config
 			emittedMergeMessage = true;
 		} else {
 			lines.push(`✅ All CI checks passed on ${prLabel}`);
+		}
+	}
+
+	// Review decision transitions (only when prev exists, not on first poll).
+	// Detect: first approval, changes-requested after approval, approval
+	// after changes-requested, and review dismissal.
+	const prevDecision = prev?.reviewDecision ?? "";
+	const currDecision = curr.reviewDecision ?? "";
+	if (prev && currDecision !== prevDecision) {
+		// First approval
+		if (currDecision === "APPROVED" && prevDecision !== "APPROVED") {
+			const defaultMsg = `✅ ${prLabel} was approved by ${curr.reviewAuthor}`;
+			const msg = prefs?.approved
+				? interpolateTemplate(prefs.approved, makeTemplateVars(config, { reviewAuthor: curr.reviewAuthor }))
+				: defaultMsg;
+			lines.push(msg);
+		}
+		// Changes requested
+		if (currDecision === "CHANGES_REQUESTED") {
+			const defaultMsg = `⛔ ${curr.reviewAuthor} requested changes on ${prLabel}`;
+			const msg = prefs?.changesRequested
+				? interpolateTemplate(prefs.changesRequested, makeTemplateVars(config, { reviewAuthor: curr.reviewAuthor }))
+				: defaultMsg;
+			lines.push(msg);
+		}
+		// Review dismissed (previously had a decision, now none or DISMISSED)
+		if ((currDecision === "" || currDecision === "DISMISSED") && prevDecision !== "" && prevDecision !== "PENDING" && prevDecision !== "DISMISSED") {
+			lines.push(`🔄 Review dismissed on ${prLabel}`);
 		}
 	}
 
@@ -738,6 +819,15 @@ export function formatActionableItems(status: PRStatus, config: MonitorConfig, p
 	}
 
 	const lines: string[] = [];
+
+	// Review decision (not a transition — just the current state)
+	const reviewDecision = status.reviewDecision ?? "";
+	const reviewAuthor = status.reviewAuthor ?? "";
+	if (reviewDecision === "APPROVED") {
+		lines.push(`✅ Approved by ${reviewAuthor} on ${prLabel}`);
+	} else if (reviewDecision === "CHANGES_REQUESTED") {
+		lines.push(`⛔ ${reviewAuthor} requested changes on ${prLabel}`);
+	}
 
 	if (status.hasConflicts) {
 		const defaultMsg = `⚠️  Merge conflicts detected on ${prLabel}`;
@@ -947,6 +1037,8 @@ export function formatFooterStatus(config: MonitorConfig, status: PRStatus | Iss
 
 	const emojis: string[] = [];
 	if (config.autoMerge && !isIssue) emojis.push("🔀");
+	if ("reviewDecision" in status && (status as PRStatus).reviewDecision === "APPROVED") emojis.push("✅");
+	if ("reviewDecision" in status && (status as PRStatus).reviewDecision === "CHANGES_REQUESTED") emojis.push("⛔");
 	if ("hasConflicts" in status && status.hasConflicts) emojis.push("⚠️");
 	if ("unresolvedThreads" in status && status.unresolvedThreads > 0) emojis.push("💬");
 	if (status.generalComments > 0) emojis.push("💭");

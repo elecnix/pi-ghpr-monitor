@@ -82,6 +82,14 @@ const AWAIT_QUERY = `query AwaitPR(
       }
       mergeable
       mergeStateStatus
+      reviews(last: 1) {
+        nodes {
+          id
+          state
+          author { login }
+          submittedAt
+        }
+      }
       commits(last: 1) {
         nodes {
           commit {

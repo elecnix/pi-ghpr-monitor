@@ -21,13 +21,15 @@ import {
 	parseCoauthors,
 	linkifyPRRefs,
 	formatAgentNotification,
+	getReviewDecision,
 } from "../src/analyzer";
-import type { PullRequestData, PRStatus, IssueData, IssueStatus, MonitorConfig, CommitNode, ReactionNode, ThreadSummary, CommentSummary } from "../src/analyzer";
+import type { PullRequestData, PRStatus, IssueData, IssueStatus, MonitorConfig, CommitNode, ReactionNode, ReviewNode, ThreadSummary, CommentSummary } from "../src/analyzer";
 
 function makeMockPR(overrides: Partial<PullRequestData> = {}): PullRequestData {
 	const defaults: PullRequestData = {
 		comments: { nodes: [] },
 		reviewThreads: { nodes: [] },
+		reviews: { nodes: [] },
 		mergeable: "MERGEABLE",
 		mergeStateStatus: "CLEAN",
 		state: "OPEN",
@@ -945,6 +947,7 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 			mergeStateStatus: "CLEAN",
 			state: "OPEN",
 			merged: false,
+			reviews: { nodes: [] },
 			commits: { nodes: [{ commit: { oid: "test-oid", status: null, checkSuites: { nodes: [] } } }] },
 		};
 		const status = snapshotPR(pr, []);
@@ -983,6 +986,7 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 			mergeStateStatus: "CLEAN",
 			state: "OPEN",
 			merged: false,
+			reviews: { nodes: [] },
 			commits: { nodes: [{ commit: { oid: "test-oid", status: null, checkSuites: { nodes: [] } } }] },
 		};
 		const status = snapshotPR(pr, []);
@@ -1004,6 +1008,7 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 			mergeStateStatus: "CLEAN",
 			state: "OPEN",
 			merged: false,
+			reviews: { nodes: [] },
 			commits: { nodes: [{ commit: { oid: "test-oid", status: null, checkSuites: { nodes: [] } } }] },
 		};
 		const status = snapshotPR(pr, []);
@@ -1024,6 +1029,7 @@ describe("acknowledged comments (THUMBS_UP reactions)", () => {
 			mergeStateStatus: "CLEAN",
 			state: "OPEN",
 			merged: false,
+			reviews: { nodes: [] },
 			commits: { nodes: [{ commit: { oid: "test-oid", status: null, checkSuites: { nodes: [] } } }] },
 		};
 		const status = snapshotPR(pr, []);
@@ -2066,5 +2072,348 @@ describe("linkifyPRRefs with issue URLs", () => {
 		const esc = "\x1b";
 		expect(result).toContain(`${esc}]8;;https://github.corp.com/team/project/issues/7${esc}\\`);
 		expect(result).toContain("team/project#7");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Approval detection tests
+// ---------------------------------------------------------------------------
+
+describe("getReviewDecision", () => {
+	it("returns empty string when no reviews", () => {
+		const pr = makeMockPR({ reviews: { nodes: [] } });
+		expect(getReviewDecision(pr)).toBe("");
+	});
+
+	it("returns latest review decision", () => {
+		const pr = makeMockPR({
+			reviews: {
+				nodes: [
+					{ id: "r-1", state: "APPROVED", author: { login: "reviewer1" }, submittedAt: "2024-01-01T00:00:00Z" },
+				],
+			},
+		});
+		expect(getReviewDecision(pr)).toBe("APPROVED");
+	});
+
+	it("returns CHANGES_REQUESTED decision", () => {
+		const pr = makeMockPR({
+			reviews: {
+				nodes: [
+					{ id: "r-1", state: "CHANGES_REQUESTED", author: { login: "reviewer1" }, submittedAt: "2024-01-01T00:00:00Z" },
+				],
+			},
+		});
+		expect(getReviewDecision(pr)).toBe("CHANGES_REQUESTED");
+	});
+
+	it("returns COMMENTED decision", () => {
+		const pr = makeMockPR({
+			reviews: {
+				nodes: [
+					{ id: "r-1", state: "COMMENTED", author: { login: "reviewer1" }, submittedAt: "2024-01-01T00:00:00Z" },
+				],
+			},
+		});
+		expect(getReviewDecision(pr)).toBe("COMMENTED");
+	});
+
+	it("returns DISMISSED decision", () => {
+		const pr = makeMockPR({
+			reviews: {
+				nodes: [
+					{ id: "r-1", state: "DISMISSED", author: { login: "reviewer1" }, submittedAt: "2024-01-01T00:00:00Z" },
+				],
+			},
+		});
+		expect(getReviewDecision(pr)).toBe("DISMISSED");
+	});
+
+	it("ignores PENDING reviews", () => {
+		const pr = makeMockPR({
+			reviews: {
+				nodes: [
+					{ id: "r-1", state: "PENDING", author: { login: "reviewer1" }, submittedAt: "2024-01-01T00:00:00Z" },
+				],
+			},
+		});
+		expect(getReviewDecision(pr)).toBe("");
+	});
+
+	it("returns empty string when all reviews are PENDING", () => {
+		const pr = makeMockPR({
+			reviews: {
+				nodes: [
+					{ id: "r-1", state: "PENDING", author: { login: "r1" }, submittedAt: "2024-01-01T00:00:00Z" },
+					{ id: "r-2", state: "PENDING", author: { login: "r2" }, submittedAt: "2024-01-01T00:01:00Z" },
+				],
+			},
+		});
+		expect(getReviewDecision(pr)).toBe("");
+	});
+
+	it("skips PENDING and returns the latest submitted review", () => {
+		const pr = makeMockPR({
+			reviews: {
+				nodes: [
+					{ id: "r-1", state: "APPROVED", author: { login: "r1" }, submittedAt: "2024-01-01T00:00:00Z" },
+					{ id: "r-2", state: "PENDING", author: { login: "r2" }, submittedAt: "2024-01-01T00:02:00Z" },
+				],
+			},
+		});
+		// PENDING has later timestamp but is skipped; APPROVED is the latest real decision
+		expect(getReviewDecision(pr)).toBe("APPROVED");
+	});
+});
+
+describe("snapshotPR extracts review decision", () => {
+	it("extracts reviewDecision and reviewAuthor from latest review", () => {
+		const pr = makeMockPR({
+			reviews: {
+				nodes: [
+					{ id: "r-1", state: "APPROVED", author: { login: "approver" }, submittedAt: "2024-01-01T00:00:00Z" },
+				],
+			},
+		});
+		const status = snapshotPR(pr, []);
+		expect(status.reviewDecision).toBe("APPROVED");
+		expect(status.reviewAuthor).toBe("approver");
+	});
+
+	it("returns empty strings when no reviews", () => {
+		const pr = makeMockPR({ reviews: { nodes: [] } });
+		const status = snapshotPR(pr, []);
+		expect(status.reviewDecision).toBe("");
+		expect(status.reviewAuthor).toBe("");
+	});
+
+	it("returns empty strings when only PENDING reviews", () => {
+		const pr = makeMockPR({
+			reviews: {
+				nodes: [
+					{ id: "r-1", state: "PENDING", author: { login: "r1" }, submittedAt: "2024-01-01T00:00:00Z" },
+				],
+			},
+		});
+		const status = snapshotPR(pr, []);
+		expect(status.reviewDecision).toBe("");
+		expect(status.reviewAuthor).toBe("");
+	});
+
+	it("extracts CHANGES_REQUESTED decision", () => {
+		const pr = makeMockPR({
+			reviews: {
+				nodes: [
+					{ id: "r-1", state: "CHANGES_REQUESTED", author: { login: "blocker" }, submittedAt: "2024-01-01T00:00:00Z" },
+				],
+			},
+		});
+		const status = snapshotPR(pr, []);
+		expect(status.reviewDecision).toBe("CHANGES_REQUESTED");
+		expect(status.reviewAuthor).toBe("blocker");
+	});
+});
+
+describe("formatStatusUpdate — approval detection", () => {
+	const config: MonitorConfig = {
+		owner: "owner",
+		repo: "repo",
+		number: 42,
+		host: "github.com",
+		mode: "all",
+		intervalSec: 60,
+		debounceSec: 30,
+	};
+
+	const baseStatus = (): PRStatus => ({
+		unresolvedThreads: 0,
+		generalComments: 0,
+		hasConflicts: false,
+		failingChecks: [],
+		pendingChecks: [],
+		lastCommentTimestamp: "",
+		lastCommentBySelf: false,
+		lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
+		reviewDecision: "",
+		reviewAuthor: "",
+	});
+
+	it("detects first approval (prev unapproved → approved)", () => {
+		const prev = baseStatus();
+		const curr = { ...baseStatus(), reviewDecision: "APPROVED", reviewAuthor: "alice" };
+		const update = formatStatusUpdate(prev, curr, config);
+		expect(update).toContain("approved");
+		expect(update).toContain("alice");
+	});
+
+	it("does NOT notify when reviewed status stays approved", () => {
+		const prev = { ...baseStatus(), reviewDecision: "APPROVED", reviewAuthor: "alice" };
+		const curr = { ...baseStatus(), reviewDecision: "APPROVED", reviewAuthor: "alice" };
+		const update = formatStatusUpdate(prev, curr, config);
+		expect(update).not.toContain("approved");
+	});
+
+	it("notifies on changes-requested after approval", () => {
+		const prev = { ...baseStatus(), reviewDecision: "APPROVED", reviewAuthor: "alice" };
+		const curr = { ...baseStatus(), reviewDecision: "CHANGES_REQUESTED", reviewAuthor: "bob" };
+		const update = formatStatusUpdate(prev, curr, config);
+		expect(update).toContain("requested changes");
+		expect(update).toContain("bob");
+	});
+
+	it("detects approval after changes-requested", () => {
+		const prev = { ...baseStatus(), reviewDecision: "CHANGES_REQUESTED", reviewAuthor: "bob" };
+		const curr = { ...baseStatus(), reviewDecision: "APPROVED", reviewAuthor: "alice" };
+		const update = formatStatusUpdate(prev, curr, config);
+		expect(update).toContain("approved");
+		expect(update).toContain("alice");
+	});
+
+	it("notifies on review dismissed", () => {
+		const prev = { ...baseStatus(), reviewDecision: "APPROVED", reviewAuthor: "alice" };
+		const curr = { ...baseStatus(), reviewDecision: "DISMISSED", reviewAuthor: "" };
+		const update = formatStatusUpdate(prev, curr, config);
+		expect(update).toContain("dismissed");
+	});
+
+	it("uses custom approved preference template", () => {
+		const prev = baseStatus();
+		const curr = { ...baseStatus(), reviewDecision: "APPROVED", reviewAuthor: "alice" };
+		const update = formatStatusUpdate(prev, curr, config, { approved: "🎉 {prLabel} got approved by {reviewAuthor}!" });
+		expect(update).toContain("🎉");
+		expect(update).toContain("alice");
+		expect(update).toContain("owner/repo#42");
+	});
+
+	it("uses custom changesRequested preference template", () => {
+		const prev = { ...baseStatus(), reviewDecision: "APPROVED", reviewAuthor: "alice" };
+		const curr = { ...baseStatus(), reviewDecision: "CHANGES_REQUESTED", reviewAuthor: "bob" };
+		const update = formatStatusUpdate(prev, curr, config, { changesRequested: "⛔ {reviewAuthor} requested changes on {prLabel}" });
+		expect(update).toContain("⛔");
+		expect(update).toContain("bob");
+	});
+
+	it("does not emit approval notification on first poll (prev=null)", () => {
+		const curr = { ...baseStatus(), reviewDecision: "APPROVED", reviewAuthor: "alice" };
+		const update = formatStatusUpdate(null, curr, config);
+		expect(update).not.toContain("approved");
+	});
+
+	it("does not emit changes-requested on first poll (prev=null)", () => {
+		const curr = { ...baseStatus(), reviewDecision: "CHANGES_REQUESTED", reviewAuthor: "bob" };
+		const update = formatStatusUpdate(null, curr, config);
+		expect(update).not.toContain("requested changes");
+	});
+
+	it("only COMMENTED reviews do not trigger notification", () => {
+		const prev = { ...baseStatus(), reviewDecision: "CHANGES_REQUESTED", reviewAuthor: "bob" };
+		const curr = { ...baseStatus(), reviewDecision: "COMMENTED", reviewAuthor: "bob" };
+		const update = formatStatusUpdate(prev, curr, config);
+		// COMMENTED is not an approval or blocking change; no special notification
+		expect(update).not.toContain("approved");
+		expect(update).not.toContain("requested changes");
+	});
+});
+
+describe("formatActionableItems — review state", () => {
+	const config: MonitorConfig = {
+		owner: "owner",
+		repo: "repo",
+		number: 42,
+		host: "github.com",
+		mode: "all",
+		intervalSec: 60,
+		debounceSec: 30,
+	};
+
+	const baseStatus = (): PRStatus => ({
+		unresolvedThreads: 0,
+		generalComments: 0,
+		hasConflicts: false,
+		failingChecks: [],
+		pendingChecks: [],
+		lastCommentTimestamp: "",
+		lastCommentBySelf: false,
+		lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
+		reviewDecision: "",
+		reviewAuthor: "",
+	});
+
+	it("reports approval when present alongside other items", () => {
+		const status = { ...baseStatus(), reviewDecision: "APPROVED", reviewAuthor: "alice", unresolvedThreads: 2 };
+		const result = formatActionableItems(status, config);
+		expect(result).toContain("Approved by alice");
+	});
+
+	it("reports changes-requested as actionable", () => {
+		const status = { ...baseStatus(), reviewDecision: "CHANGES_REQUESTED", reviewAuthor: "bob" };
+		const result = formatActionableItems(status, config);
+		expect(result).toContain("requested changes");
+	});
+
+	it("does NOT report review state when nothing is approved or blocking", () => {
+		const status = { ...baseStatus(), reviewDecision: "COMMENTED", reviewAuthor: "bob" };
+		const result = formatActionableItems(status, config);
+		expect(result).toBeNull();
+	});
+
+	it("reports approved and unresolved threads together", () => {
+		const status = { ...baseStatus(), reviewDecision: "APPROVED", reviewAuthor: "alice", unresolvedThreads: 3, failingChecks: ["ci/test"] };
+		const result = formatActionableItems(status, config);
+		expect(result).toContain("Approved by alice");
+		expect(result).toContain("unresolved review thread");
+		expect(result).toContain("Failing CI");
+	});
+});
+
+describe("formatFooterStatus — review emojis", () => {
+	const config: MonitorConfig = {
+		owner: "owner", repo: "repo", number: 42,
+		host: "github.com", mode: "all", intervalSec: 60, debounceSec: 30,
+	};
+
+	const clean: PRStatus = {
+		unresolvedThreads: 0, generalComments: 0, hasConflicts: false,
+		failingChecks: [], pendingChecks: [],
+		lastCommentTimestamp: "", lastCommentBySelf: false,
+		lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
+		threadDetails: [], commentDetails: [], checkDetails: [],
+		reviewDecision: "", reviewAuthor: "",
+	};
+
+	it("shows approved emoji when PR is approved", () => {
+		const status = { ...clean, reviewDecision: "APPROVED" };
+		const result = formatFooterStatus(config, status);
+		expect(result).toContain("✅");
+	});
+
+	it("shows changes-requested emoji when changes are requested", () => {
+		const status = { ...clean, reviewDecision: "CHANGES_REQUESTED" };
+		const result = formatFooterStatus(config, status);
+		expect(result).toContain("⛔");
+	});
+
+	it("shows no review emoji for COMMENTED reviews", () => {
+		const status = { ...clean, reviewDecision: "COMMENTED" };
+		const result = formatFooterStatus(config, status);
+		expect(result).not.toContain("✅");
+		expect(result).not.toContain("⛔");
+	});
+
+	it("shows no review emoji for DISMISSED reviews", () => {
+		const status = { ...clean, reviewDecision: "DISMISSED" };
+		const result = formatFooterStatus(config, status);
+		expect(result).not.toContain("✅");
+		expect(result).not.toContain("⛔");
+	});
+
+	it("shows both approval and thread emojis when both present", () => {
+		const status = { ...clean, reviewDecision: "APPROVED", unresolvedThreads: 2 };
+		const result = formatFooterStatus(config, status);
+		expect(result).toContain("✅");
+		expect(result).toContain("💬");
 	});
 });
