@@ -93,7 +93,7 @@ function buildResponse() {
 				pullRequest: {
 					comments: { nodes: commentNodes },
 					reviewThreads: { nodes: reviewThreadNodes },
-tttttreviews: { nodes: [] },
+					reviews: { nodes: [] },
 					mergeable: state.hasConflicts ? "CONFLICTING" : "MERGEABLE",
 					mergeStateStatus: state.hasConflicts ? "DIRTY" : "CLEAN",
 					state: (state as any).state || "OPEN",
