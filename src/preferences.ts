@@ -157,7 +157,7 @@ export const DEFAULT_PREFERENCES: Partial<Record<keyof Preferences, string | und
 	conflict: "⚠️  Merge conflicts detected on {prLabel}",
 	ciFailure: "❌ Failing CI checks on {prLabel}: {failingChecks}",
 	reminder: undefined,
-	allClear: "✨ {prLabel} — no issues, all clear",
+	allClear: "✨ {prLabel} — open, all clear",
 	firstPoll: "📡 Monitoring {owner}/{repo}#{number}... (polling every {intervalSec}s)",
 	descriptionStaleness: undefined,
 	prCreateNudge: DEFAULT_PR_CREATE_NUDGE,

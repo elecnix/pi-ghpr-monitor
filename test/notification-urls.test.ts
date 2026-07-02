@@ -163,10 +163,10 @@ describe("formatActionableItems and formatStatusUpdate use PR labels not URLs", 
 
 describe("linkifyPRRefs on notification messages", () => {
 	it("correctly linkifies the 'all clear' notification", () => {
-		const input = "✨ v2nic/pi-ghpr-monitor#42 — no issues, all clear";
+		const input = "✨ v2nic/pi-ghpr-monitor#42 — open, all clear";
 		const result = linkifyPRRefs(input);
 		expect(result).toBe(
-			`✨ ${linkify("https://github.com/v2nic/pi-ghpr-monitor/pull/42", "v2nic/pi-ghpr-monitor#42")} — no issues, all clear`,
+			`✨ ${linkify("https://github.com/v2nic/pi-ghpr-monitor/pull/42", "v2nic/pi-ghpr-monitor#42")} — open, all clear`,
 		);
 	});
 

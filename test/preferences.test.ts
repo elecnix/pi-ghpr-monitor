@@ -420,7 +420,7 @@ describe("DEFAULT_PREFERENCES", () => {
 	});
 
 	it("allClear default matches the hardcoded message", () => {
-		expect(DEFAULT_PREFERENCES.allClear).toBe("✨ {prLabel} — no issues, all clear");
+		expect(DEFAULT_PREFERENCES.allClear).toBe("✨ {prLabel} — open, all clear");
 	});
 
 	it("conflict default matches the hardcoded message", () => {
@@ -604,7 +604,7 @@ describe("preferences in notification formatting", () => {
 
 		const result = formatStatusUpdate(prev, curr, config, prefs);
 		expect(result).toContain("🎉 v2nic/pi-ghpr-monitor#32 is all good!");
-		expect(result).not.toContain("no issues, all clear");
+		expect(result).not.toContain("open, all clear");
 	});
 
 	it("formatStatusUpdate uses preference for conflict", async () => {
