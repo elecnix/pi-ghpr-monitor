@@ -2417,3 +2417,78 @@ describe("formatFooterStatus — review emojis", () => {
 		expect(result).toContain("💬");
 	});
 });
+
+describe("formatActionableItems prevStatus dedup (retriggerComments=false)", () => {
+	const config: MonitorConfig = {
+		owner: "owner", repo: "repo", number: 42, host: "github.com",
+		mode: "all", intervalSec: 60, debounceSec: 30, resourceType: "pr",
+	};
+
+	const makeStatus = (threads: { id: string }[], comments: { id: string }[]): PRStatus => ({
+		unresolvedThreads: threads.length,
+		generalComments: comments.length,
+		hasConflicts: false,
+		failingChecks: [],
+		pendingChecks: [],
+		lastCommentTimestamp: "", lastCommentBySelf: false,
+		lastCommitOid: "", lastCommitAuthor: "", lastCommitCoauthors: "",
+		lastCommitMessageHeadline: "",
+		threadDetails: threads.map(t => ({
+			id: t.id, isResolved: false,
+			lastCommentAuthor: "dev", lastCommentBody: "Please fix",
+		})),
+		commentDetails: comments.map(c => ({
+			id: c.id, restApiId: "1", author: "dev", body: "General note",
+		})),
+		checkDetails: [],
+		reviewDecision: "", reviewAuthor: "",
+	});
+
+	it("returns null when prev has the same threads and comments (no new items)", () => {
+		const prev = makeStatus(
+			[{ id: "t1" }, { id: "t2" }],
+			[{ id: "c1" }],
+		);
+		const curr = makeStatus(
+			[{ id: "t1" }, { id: "t2" }],
+			[{ id: "c1" }],
+		);
+		const result = formatActionableItems(curr, config, undefined, prev);
+		expect(result).toBeNull();
+	});
+
+	it("reports only new threads not present in prev", () => {
+		const prev = makeStatus(
+			[{ id: "t1" }],
+			[],
+		);
+		const curr = makeStatus(
+			[{ id: "t1" }, { id: "t2" }],
+			[],
+		);
+		const result = formatActionableItems(curr, config, undefined, prev);
+		// Only t2 is new — the count shown should reflect only the new thread
+		expect(result).toContain("1 new review thread(s)");
+		expect(result).toContain("2 total");
+	});
+
+	it("returns null when prev had threads but curr has none (all resolved/acknowledged)", () => {
+		const prev = makeStatus(
+			[{ id: "t1" }, { id: "t2" }],
+			[{ id: "c1" }],
+		);
+		const curr = makeStatus([], []);
+		const result = formatActionableItems(curr, config, undefined, prev);
+		expect(result).toBeNull();
+	});
+
+	it("reports all items when prev is not provided (backward compat)", () => {
+		const curr = makeStatus(
+			[{ id: "t1" }],
+			[{ id: "c1" }],
+		);
+		const result = formatActionableItems(curr, config);
+		expect(result).toContain("1 unresolved review thread(s)");
+		expect(result).toContain("1 general comment(s)");
+	});
+});
