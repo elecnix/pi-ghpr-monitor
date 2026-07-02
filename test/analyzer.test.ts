@@ -1209,18 +1209,18 @@ describe("linkifyPRRefs", () => {
 	}
 
 	it("linkifies owner/repo#number patterns", () => {
-		const input = "✨ v2nic/gh-pr-review#42 — no issues, all clear";
+		const input = "✨ v2nic/gh-pr-review#42 — open, all clear";
 		const result = linkifyPRRefs(input);
 		expect(result).toBe(
-			`✨ ${linkify("https://github.com/v2nic/gh-pr-review/pull/42", "v2nic/gh-pr-review#42")} — no issues, all clear`,
+			`✨ ${linkify("https://github.com/v2nic/gh-pr-review/pull/42", "v2nic/gh-pr-review#42")} — open, all clear`,
 		);
 	});
 
 	it("linkifies multiple PR refs in one message", () => {
-		const input = "✅ All CI checks passed on mobilityhouse/vgi-na-masscec#538 ✨ mobilityhouse/vgi-na-masscec#538 — no issues, all clear";
+		const input = "✅ All CI checks passed on mobilityhouse/vgi-na-masscec#538 ✨ mobilityhouse/vgi-na-masscec#538 — open, all clear";
 		const result = linkifyPRRefs(input);
 		expect(result).toBe(
-			`✅ All CI checks passed on ${linkify("https://github.com/mobilityhouse/vgi-na-masscec/pull/538", "mobilityhouse/vgi-na-masscec#538")} ✨ ${linkify("https://github.com/mobilityhouse/vgi-na-masscec/pull/538", "mobilityhouse/vgi-na-masscec#538")} — no issues, all clear`,
+			`✅ All CI checks passed on ${linkify("https://github.com/mobilityhouse/vgi-na-masscec/pull/538", "mobilityhouse/vgi-na-masscec#538")} ✨ ${linkify("https://github.com/mobilityhouse/vgi-na-masscec/pull/538", "mobilityhouse/vgi-na-masscec#538")} — open, all clear`,
 		);
 	});
 
