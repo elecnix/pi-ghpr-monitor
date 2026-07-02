@@ -93,6 +93,18 @@ export const PreferencesSchema = Type.Object(
 					"Prompt override for auto-detecting gh pr create output and nudging the LLM to start monitoring. Variables: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}",
 			}),
 		),
+		approved: Type.Optional(
+			Type.String({
+				description:
+					"Prompt override for when a PR is first approved. Variables: {owner}, {repo}, {number}, {host}, {prLabel}, {reviewAuthor}",
+			}),
+		),
+		changesRequested: Type.Optional(
+			Type.String({
+				description:
+					"Prompt override for when a reviewer requests changes. Variables: {owner}, {repo}, {number}, {host}, {prLabel}, {reviewAuthor}",
+			}),
+		),
 		ciGreenMerge: Type.Optional(
 			Type.String({
 				description:
@@ -207,6 +219,8 @@ export interface TemplateVars {
 	failingChecks?: string;
 	conflict?: boolean;
 	intervalSec?: number;
+	// Review-related (used by approved / changesRequested)
+	reviewAuthor?: string;
 	// Commit-related (used by descriptionStaleness)
 	commitOid?: string;
 	commitShortOid?: string;
@@ -216,7 +230,7 @@ export interface TemplateVars {
 	commitMessageHeadline?: string;
 }
 
-const TEMPLATE_VAR_RE = /\{(owner|repo|number|host|prLabel|prUrl|unresolvedThreads|generalComments|failingChecks|conflict|intervalSec|commitOid|commitShortOid|commitUrl|commitAuthor|commitCoauthors|commitMessageHeadline)\}/g;
+const TEMPLATE_VAR_RE = /\{(owner|repo|number|host|prLabel|prUrl|unresolvedThreads|generalComments|failingChecks|conflict|intervalSec|reviewAuthor|commitOid|commitShortOid|commitUrl|commitAuthor|commitCoauthors|commitMessageHeadline)\}/g;
 
 /** Non-global version for .test() checks. The /g flag causes .test() to
  *  advance lastIndex across successive calls, producing false negatives.
@@ -254,6 +268,8 @@ export function interpolateTemplate(template: string, vars: TemplateVars): strin
 				return vars.conflict !== undefined ? String(vars.conflict) : match;
 			case "intervalSec":
 				return vars.intervalSec !== undefined ? String(vars.intervalSec) : match;
+			case "reviewAuthor":
+				return vars.reviewAuthor ?? match;
 			case "commitOid":
 				return vars.commitOid ?? match;
 			case "commitShortOid":
@@ -528,7 +544,6 @@ export function getPreferenceWithDefault(
 	defaultValue: string,
 ): string {
 	const template = prefs[key];
-	if (key === "ignoredBots") return defaultValue;
 	if (template !== undefined && template !== "") {
 		return interpolateTemplate(template as string, vars);
 	}
