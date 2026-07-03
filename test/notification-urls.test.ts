@@ -179,11 +179,11 @@ describe("linkifyPRRefs on notification messages", () => {
 	});
 
 	it("linkifies a single PR ref into a single link", () => {
-		// The "No issues found" message uses PR labels (not full URLs),
+		// The "Open" message uses PR labels (not full URLs),
 		// so linkification should produce exactly one OSC 8 link
-		const input = "✅ No issues found on v2nic/pi-ghpr-monitor#42";
+		const input = "✅ Open, nothing to address on v2nic/pi-ghpr-monitor#42";
 		const result = linkifyPRRefs(input);
 		const linkified = linkify("https://github.com/v2nic/pi-ghpr-monitor/pull/42", "v2nic/pi-ghpr-monitor#42");
-		expect(result).toBe(`✅ No issues found on ${linkified}`);
+		expect(result).toBe(`✅ Open, nothing to address on ${linkified}`);
 	});
 });

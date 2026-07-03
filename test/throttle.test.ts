@@ -1272,7 +1272,7 @@ describe("Force check sends current state even when nothing changed", () => {
 				// When agent is active, queue for flush on turn_end.
 				if (forceNotify) {
 					const items = formatActionableItems(curr, config);
-					const msg = items ?? `✅ No issues found on https://github.com/${config.owner}/${config.repo}/pull/${config.number}`;
+					const msg = items ?? `✅ Open, nothing to address on https://github.com/${config.owner}/${config.repo}/pull/${config.number}`;
 					if (agentTurnActive) {
 						queuedForceChecks.push(msg);
 					} else {
@@ -1333,7 +1333,7 @@ describe("Force check sends current state even when nothing changed", () => {
 		sim.poll(clean);
 		expect(sim.getSentMessages()).toHaveLength(2);
 		expect(sim.getSentMessages()[1].type).toBe("check");
-		expect(sim.getSentMessages()[1].content).toContain("No issues");
+		expect(sim.getSentMessages()[1].content).toContain("nothing to address");
 	});
 
 	it("queues force-check when agent turn is active, delivers on turn_end", () => {
@@ -1428,7 +1428,7 @@ describe("Force check sends current state even when nothing changed", () => {
 		expect(sim.getSentMessages()[1].type).toBe("check");
 		expect(sim.getSentMessages()[2].type).toBe("check");
 		expect(sim.getSentMessages()[1].content).toContain("unresolved"); // first check (withComments)
-		expect(sim.getSentMessages()[2].content).toContain("No issues"); // second check (clean)
+		expect(sim.getSentMessages()[2].content).toContain("nothing to address"); // second check (clean)
 	});
 });
 

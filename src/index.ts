@@ -724,8 +724,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					const prLabel = `${config.owner}/${config.repo}#${config.number}`;
 					const items = formatActionableItems(curr, config, currentPreferences);
 					const detItems = formatAgentNotification(curr, config, currentPreferences);
-					const msg = items ?? `\u2705 No issues found on ${prLabel}`;
-					const detMsg = detItems?.detailed ?? `\u2705 No issues found on ${prLabel}`;
+					const msg = items ?? `\u2705 Open, nothing to address on ${prLabel}`;
+					const detMsg = detItems?.detailed ?? `\u2705 Open, nothing to address on ${prLabel}`;
 					if (agentTurnActive) {
 						queuedForceChecks.push({ concise: msg, detailed: detMsg, host: config.host, monitorKey: prKey(config) });
 					} else {
@@ -877,7 +877,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				if (status) {
 					lines.push(`${header}\n  ${status.replace(/\n/g, "\n  ")}\n  Last checked: ${ts}`);
 				} else {
-					lines.push(`${header}\n  ✨ No issues, all clear (last checked: ${ts})`);
+					lines.push(`${header}\n  ✨ Open, all clear (last checked: ${ts})`);
 				}
 			}
 		}
