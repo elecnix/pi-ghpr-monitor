@@ -49,6 +49,8 @@ import {
 } from "./preferences";
 import { setSessionId, enableDebug, disableDebug, isDebugEnabled, closeLogger, log, logPRSnapshot, logStatus, getLogPath } from "./logger";
 import { isPRCreateCommand, parsePRUrlsFromOutput, createPRCreateNudge } from "./pr-create-hook";
+import { parseLinearRef, getLinearApiKey } from "./linear";
+import { LinearMonitorManager, type LinearMonitorHost } from "./linear-monitor";
 
 // ---------------------------------------------------------------------------
 // GraphQL query (same as gh-pr-review's AWAIT_QUERY)
@@ -321,7 +323,9 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	// For testing: allows reducing the polling interval
 	const MOCK_INTERVAL_SECS = process.env.GHPR_MONITOR_INTERVAL_SECS ? parseInt(process.env.GHPR_MONITOR_INTERVAL_SECS, 10) : undefined;
 
-	const STEERING_PROMPT = `You have access to the ghpr-monitor tool. When the user asks you to watch or monitor a PR, use ghpr-monitor with action "start" to begin monitoring. The tool has actions: start, status, check, merge, and preferences. Multiple PRs can be monitored simultaneously. You must NOT stop monitoring on your own — only the user can stop via /ghpr-monitor off (stops all) or /ghpr-monitor off <PR> (stops specific). The user can also run /ghpr-monitor check to trigger an immediate poll (all PRs or a specific one). You will receive PR status updates as notifications. The url parameter accepts GitHub PR URLs or shorthand like "owner/repo#123". Use action='preferences' to view or customize the notification prompts. Calling with no value shows current preferences (with defaults); providing a value in JSON writes new preferences. Set a key to null to reset it to default. Use action='merge' to toggle auto-merge when CI passes (the monitor will notify you to merge the PR once CI is green).`;
+	const STEERING_PROMPT = `You have access to the ghpr-monitor tool. When the user asks you to watch or monitor a PR, use ghpr-monitor with action "start" to begin monitoring. The tool has actions: start, status, check, merge, and preferences. Multiple PRs can be monitored simultaneously. You must NOT stop monitoring on your own — only the user can stop via /ghpr-monitor off (stops all) or /ghpr-monitor off <PR> (stops specific). The user can also run /ghpr-monitor check to trigger an immediate poll (all PRs or a specific one). You will receive PR status updates as notifications. The url parameter accepts GitHub PR URLs or shorthand like "owner/repo#123". Use action='preferences' to view or customize the notification prompts. Calling with no value shows current preferences (with defaults); providing a value in JSON writes new preferences. Set a key to null to reset it to default. Use action='merge' to toggle auto-merge when CI passes (the monitor will notify you to merge the PR once CI is green).
+
+You also have access to the linear-monitor tool for watching Linear issues. When the user asks you to watch or monitor a Linear ticket (e.g. "ENG-123" or a linear.app issue URL), use linear-monitor with action "start". It notifies you about new comments, state transitions, assignee changes, priority changes, and newly linked PRs. It requires a Linear personal API key in the LINEAR_API_KEY environment variable. As with PRs, you must NOT stop monitoring on your own — only the user can stop via /linear-monitor off.`;
 
 	// Register a custom message renderer for "ghpr-monitor" messages.
 	// This renders only the concise summary in the TUI, while the agent
@@ -424,6 +428,50 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		});
 	}
 
+	// -----------------------------------------------------------------------
+	// Linear monitoring (parallel to PR monitoring)
+	// -----------------------------------------------------------------------
+	//
+	// Linear tickets are watched by an independent manager that reuses the same
+	// throttle-during-turn / notify / footer patterns as the PR monitor, but
+	// keeps its polling logic in src/linear-monitor.ts so the PR path is
+	// untouched. Auth follows Linear's documented best practice: a personal API
+	// key from the LINEAR_API_KEY environment variable, sent raw (no Bearer).
+
+	function sendLinearNotification(concise: string, detailed: string) {
+		// Deliver the detailed content to the agent as a steer message and
+		// store a concise CustomMessage for the TUI renderer (display:false so
+		// it doesn't duplicate the visible UserMessage).
+		pi.sendUserMessage(detailed, { deliverAs: "steer" });
+		pi.sendMessage({
+			customType: "linear-monitor",
+			content: detailed,
+			display: false,
+			details: { concise },
+		});
+	}
+
+	const linearHost: LinearMonitorHost = {
+		sendNotification: (concise, detailed) => sendLinearNotification(concise, detailed),
+		notify: (msg, level) => uiCtx?.notify(msg, level),
+		setFooter: (text) => uiCtx?.setStatus("linear-monitor", text),
+		isAgentTurnActive: () => agentTurnActive,
+		getIgnoredBots: () => currentPreferences.ignoredBots ?? [],
+		getApiKey: () => getLinearApiKey(),
+		// LINEAR_MOCK_BASE_URL lets the E2E suite point the client at a mock server.
+		endpoint: process.env.LINEAR_MOCK_BASE_URL,
+	};
+	const linearManager = new LinearMonitorManager(linearHost);
+
+	// Render only the concise summary for linear-monitor messages in the TUI,
+	// mirroring the ghpr-monitor renderer.
+	pi.registerMessageRenderer<{ concise: string }>("linear-monitor", (message, _options, theme) => {
+		const concise = message.details?.concise ?? (typeof message.content === "string" ? message.content : "");
+		const box = new Box(1, 0, (t: string) => theme.bg("customMessageBg", t));
+		box.addChild(new Text(concise, 0, 0));
+		return box;
+	});
+
 	// Track agent turn state to avoid spamming updates while LLM is working
 	pi.on("turn_start", () => {
 		agentTurnActive = true;
@@ -479,12 +527,15 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				mon.pollWakeResolve = null;
 			}
 		}
+		// Flush any Linear updates deferred while the agent was working
+		linearManager.flushQueued();
 	});
 
 	// Clean up on session shutdown
 	pi.on("session_shutdown", async () => {
 		log("Session shutdown event received");
 		stopAllMonitors();
+		linearManager.stopAll();
 		closeLogger();
 	});
 
@@ -1470,6 +1521,209 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					return {
 						content: [{ type: "text", text: `Unknown action: ${_exhaustiveCheck}` }],
 						details: { action: _exhaustiveCheck, status: "unknown" },
+					};
+				}
+			}
+		},
+	});
+
+	// -----------------------------------------------------------------------
+	// Register the /linear-monitor command
+	// -----------------------------------------------------------------------
+
+	/** Resolve a user-supplied string to a Linear issue key (upper-cased). */
+	function resolveLinearKey(input: string): string | null {
+		const ref = parseLinearRef(input);
+		if (ref) return ref.key;
+		const trimmed = input.trim().toUpperCase();
+		return linearManager.list().includes(trimmed) ? trimmed : null;
+	}
+
+	pi.registerCommand("linear-monitor", {
+		description:
+			"Monitor Linear issues: /linear-monitor <ENG-123|URL> — /linear-monitor status — /linear-monitor check [KEY] — /linear-monitor off [KEY]",
+		getArgumentCompletions: (prefix: string) => {
+			const completions = ["off", "stop", "check", "status"];
+			for (const key of linearManager.list()) completions.push(key);
+			return completions.filter((c) => c.startsWith(prefix)).map((c) => ({ value: c, label: c }));
+		},
+		handler: async (args, ctx) => {
+			uiCtx = ctx.ui;
+			const raw = args.trim();
+
+			// off [KEY] — stop monitoring (user only)
+			if (raw.toLowerCase().startsWith("off") || raw.toLowerCase().startsWith("stop")) {
+				const rest = raw.replace(/^(off|stop)\s*/i, "").trim();
+				if (!rest) {
+					ctx.ui.notify(linearManager.stopAll(), "info");
+					return;
+				}
+				const key = resolveLinearKey(rest) ?? rest.toUpperCase();
+				ctx.ui.notify(linearManager.stop(key), "info");
+				return;
+			}
+
+			// status / on / (empty) — show current monitors
+			if (raw.toLowerCase() === "status" || raw.toLowerCase() === "on" || raw === "") {
+				const keys = linearManager.list();
+				if (keys.length === 0) {
+					ctx.ui.notify("No Linear monitors running.\n  Start one with: /linear-monitor ENG-123", "info");
+					return;
+				}
+				ctx.ui.notify(`Monitoring ${keys.length} Linear issue(s): ${keys.join(", ")}`, "info");
+				return;
+			}
+
+			// check [KEY] — force an immediate poll
+			if (raw.toLowerCase() === "check" || raw.toLowerCase().startsWith("check ")) {
+				const rest = raw.replace(/^check\s*/i, "").trim();
+				if (linearManager.list().length === 0) {
+					ctx.ui.notify("No Linear monitors running. Start one first with /linear-monitor ENG-123", "warning");
+					return;
+				}
+				const key = rest ? resolveLinearKey(rest) ?? undefined : undefined;
+				if (rest && !key) {
+					ctx.ui.notify(`Unknown issue: ${rest}. Monitoring: ${linearManager.list().join(", ")}`, "warning");
+					return;
+				}
+				linearManager.check(key);
+				ctx.ui.notify(`Checking ${key ?? `all ${linearManager.list().length} Linear issue(s)`} now…`, "info");
+				return;
+			}
+
+			// Otherwise: treat the first token as an issue key or URL to start.
+			const ref = parseLinearRef(raw.split(/\s+/)[0]);
+			if (!ref) {
+				ctx.ui.notify(
+					"Usage:\n  /linear-monitor ENG-123 — start monitoring an issue\n  /linear-monitor https://linear.app/…/issue/ENG-123\n  /linear-monitor status\n  /linear-monitor check [KEY]\n  /linear-monitor off [KEY]",
+					"info",
+				);
+				return;
+			}
+			const result = linearManager.add(ref);
+			if (result.error) {
+				ctx.ui.notify(result.error, "error");
+				return;
+			}
+			ctx.ui.notify(result.message ?? `Monitoring ${ref.key}`, result.alreadyMonitoring ? "warning" : "info");
+		},
+	});
+
+	// -----------------------------------------------------------------------
+	// Register the linear-monitor tool (LLM-callable)
+	// -----------------------------------------------------------------------
+
+	const LinearMonitorParams = Type.Object({
+		action: Type.Union([Type.Literal("start"), Type.Literal("status"), Type.Literal("check")]),
+		issue: Type.Optional(Type.String({ description: "Linear issue key (e.g. ENG-123) or a linear.app issue URL" })),
+		interval: Type.Optional(Type.Number({ description: "Polling interval in seconds (default: 60, minimum: 10)" })),
+	}) as any;
+
+	pi.registerTool({
+		name: "linear-monitor",
+		label: "Linear Monitor",
+		description:
+			"Monitor Linear issues for new comments, state transitions, assignee changes, priority changes, and newly linked PRs. Requires a Linear personal API key in the LINEAR_API_KEY environment variable. Use action='start' with an 'issue' (key like ENG-123 or a linear.app URL). Use action='status' to list monitored issues, action='check' to poll now. The agent cannot stop monitoring — only the user can stop via /linear-monitor off.",
+		promptSnippet: "Monitor Linear issues for changes (comments, state, assignee, priority, linked PRs)",
+		promptGuidelines: [
+			"When the user asks you to watch or monitor a Linear issue, use linear-monitor with action='start'.",
+			"Accept a Linear issue key like 'ENG-123' or a linear.app issue URL in the 'issue' parameter.",
+			"Multiple issues can be monitored at the same time — start a new monitor without stopping existing ones.",
+			"Use action='status' to list monitored issues and action='check' to trigger an immediate poll.",
+			"Monitoring requires the LINEAR_API_KEY environment variable (a Linear personal API key). If it's missing, tell the user how to set it.",
+			"Do NOT stop monitoring on your own. Only the user can stop via /linear-monitor off.",
+			"You will receive Linear issue updates as notifications.",
+		],
+		parameters: LinearMonitorParams,
+
+		async execute(_toolCallId, params: Static<typeof LinearMonitorParams>, _signal, _onUpdate, _ctx) {
+			uiCtx = _ctx.ui;
+
+			switch (params.action) {
+				case "start": {
+					if (!params.issue) {
+						return {
+							content: [{ type: "text", text: "Missing 'issue'. Provide a Linear key (e.g. ENG-123) or a linear.app URL." }],
+							details: { action: "start", status: "missing_params" },
+						};
+					}
+					const ref = parseLinearRef(params.issue);
+					if (!ref) {
+						return {
+							content: [{ type: "text", text: `Invalid Linear issue: ${params.issue}. Expected a key like ENG-123 or a linear.app issue URL.` }],
+							details: { action: "start", status: "invalid" },
+						};
+					}
+					const result = linearManager.add(ref, { intervalSec: params.interval });
+					if (result.error) {
+						return {
+							content: [{ type: "text", text: result.error }],
+							details: { action: "start", status: "no_api_key" },
+						};
+					}
+					return {
+						content: [{ type: "text", text: result.message ?? `Monitoring ${ref.key}` }],
+						details: {
+							action: "start",
+							status: result.alreadyMonitoring ? "already_running" : "started",
+							key: ref.key,
+							monitored: linearManager.list(),
+						},
+					};
+				}
+
+				case "status": {
+					const keys = linearManager.list();
+					return {
+						content: [
+							{
+								type: "text",
+								text: keys.length
+									? `Monitoring ${keys.length} Linear issue(s): ${keys.join(", ")}`
+									: "No Linear issues are currently monitored.",
+							},
+						],
+						details: { action: "status", monitored: keys },
+					};
+				}
+
+				case "check": {
+					if (linearManager.list().length === 0) {
+						return {
+							content: [{ type: "text", text: "No Linear monitors are active. Start one first with action='start'." }],
+							details: { action: "check", status: "idle" },
+						};
+					}
+					let key: string | undefined;
+					if (params.issue) {
+						const ref = parseLinearRef(params.issue);
+						key = ref?.key;
+						if (!key) {
+							return {
+								content: [{ type: "text", text: `Invalid Linear issue: ${params.issue}` }],
+								details: { action: "check", status: "invalid" },
+							};
+						}
+					}
+					const ok = linearManager.check(key);
+					return {
+						content: [
+							{
+								type: "text",
+								text: ok
+									? `Checking ${key ?? "all Linear issue(s)"} now…`
+									: `Not monitoring ${key}. Monitoring: ${linearManager.list().join(", ")}`,
+							},
+						],
+						details: { action: "check", status: ok ? "triggered" : "not_found" },
+					};
+				}
+
+				default: {
+					const _lexhaustiveCheck: never = params.action as never;
+					return {
+						content: [{ type: "text", text: `Unknown action: ${_lexhaustiveCheck}` }],
+						details: { action: _lexhaustiveCheck, status: "unknown" },
 					};
 				}
 			}

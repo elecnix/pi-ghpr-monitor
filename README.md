@@ -160,10 +160,68 @@ The tool accepts these parameters:
 | `mode`      | string | `all`   | Watch mode: `all`, `comments`, `conflicts`, `actions` |
 | `interval`  | number | `60`    | Polling interval in seconds (minimum: 10)      |
 
+## Linear Ticket Monitoring
+
+Alongside GitHub PRs, the extension can monitor **Linear issues** and inject
+updates into your session — new comments, workflow-state transitions
+(e.g. `In Progress` → `In Review`), assignee changes, priority changes, and
+newly linked PRs. It reuses the same throttle-during-turn / change-detection /
+notification model as the PR monitor.
+
+### API access
+
+Following [Linear's documented best practice](https://linear.app/developers/graphql)
+for scripts and local development, monitoring authenticates with a **personal
+API key** (not OAuth). Create one in Linear under **Settings → Security &
+Access → Personal API keys**, then expose it via an environment variable:
+
+```bash
+export LINEAR_API_KEY="lin_api_…"
+```
+
+Personal API keys are sent in the `Authorization` header **without** a `Bearer`
+prefix (that prefix is only for OAuth access tokens), and requests go to
+`https://api.linear.app/graphql`. The key lives outside the code — the same
+"auth is the user's responsibility" model the PR monitor uses with `gh`.
+
+### Command: `/linear-monitor`
+
+```
+/linear-monitor ENG-123                                       Start monitoring an issue
+/linear-monitor https://linear.app/acme/issue/ENG-123/slug    Start from a Linear URL
+/linear-monitor status                                        Show monitored issues
+/linear-monitor check [ENG-123]                               Poll now (all or specific)
+/linear-monitor off [ENG-123]                                 Stop monitoring (all or specific)
+```
+
+### Tool: `linear-monitor`
+
+The agent can start monitoring or check status itself:
+
+```
+linear-monitor(action="start", issue="ENG-123")
+linear-monitor(action="start", issue="https://linear.app/acme/issue/ENG-123")
+linear-monitor(action="status")
+linear-monitor(action="check", issue="ENG-123")
+```
+
+As with PRs, the agent **cannot** stop monitoring — only `/linear-monitor off`
+can do that.
+
+### Example notification
+
+```
+💬 1 new comment(s) on ENG-123:
+  - [alice] Can you split this into two issues?
+🔄 ENG-123 moved from "In Progress" to "In Review"
+👤 ENG-123 reassigned from marty to doc
+```
+
 ## Requirements
 
 - [Pi](https://github.com/mariozechner/pi-coding-agent) coding agent
-- [gh](https://cli.github.com/) CLI installed and authenticated with access to the target repository
+- [gh](https://cli.github.com/) CLI installed and authenticated with access to the target repository (for PR monitoring)
+- A Linear [personal API key](https://linear.app/developers/graphql) in the `LINEAR_API_KEY` environment variable (for Linear monitoring)
 
 ## Development
 

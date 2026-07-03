@@ -248,6 +248,13 @@ describe("No rogue pi.sendUserMessage() calls bypass sendPRNotification", () => 
 		const fnStart = src.indexOf("function sendPRNotification(");
 		const fnEnd = fnStart + fnBody!.length;
 
+		// sendLinearNotification is the parallel notification wrapper for Linear
+		// tickets. Like sendPRNotification, it legitimately calls
+		// pi.sendUserMessage() to deliver the update to the agent.
+		const linearBody = extractFunctionBody(src, "sendLinearNotification");
+		const linearStart = src.indexOf("function sendLinearNotification(");
+		const linearEnd = linearStart === -1 ? -1 : linearStart + (linearBody?.length ?? 0);
+
 		// Find all pi.sendUserMessage() calls
 		const callIdxs: number[] = [];
 		const re = /pi\.sendUserMessage\(/g;
@@ -259,6 +266,9 @@ describe("No rogue pi.sendUserMessage() calls bypass sendPRNotification", () => 
 		for (const idx of callIdxs) {
 			// Check if it's inside sendPRNotification
 			const insideSendPR = idx >= fnStart && idx <= fnEnd;
+
+			// Check if it's inside sendLinearNotification (the Linear analog)
+			const insideSendLinear = linearStart !== -1 && idx >= linearStart && idx <= linearEnd;
 
 			// Check if it's the !/start subcommand steer prompt
 			const nearby = src.slice(Math.max(0, idx - 300), idx + 300);
@@ -276,8 +286,8 @@ describe("No rogue pi.sendUserMessage() calls bypass sendPRNotification", () => 
 			const isPrCreateNudge = nearby.includes("createPRCreateNudge") || nearby.includes("injecting nudge");
 
 			expect(
-				insideSendPR || isStartSubcommandPrompt || isSteerPrompt || isComment || isPrCreateNudge,
-				`pi.sendUserMessage() at index ${idx} should be inside sendPRNotification(), the !/start prompt, or a steering prompt`
+				insideSendPR || insideSendLinear || isStartSubcommandPrompt || isSteerPrompt || isComment || isPrCreateNudge,
+				`pi.sendUserMessage() at index ${idx} should be inside sendPRNotification(), sendLinearNotification(), the !/start prompt, or a steering prompt`
 			).toBe(true);
 		}
 	});
