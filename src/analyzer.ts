@@ -707,7 +707,7 @@ export function formatStatusUpdate(prev: PRStatus | null, curr: PRStatus, config
 		(curr.pendingStatuses ?? []).length === 0 &&
 		(!prev || prev.hasConflicts || prev.unresolvedThreads > 0 || prev.generalComments > 0 || prev.failingChecks.length > 0 || prev.pendingChecks.length > 0 || (prev.pendingStatuses ?? []).length > 0)
 	) {
-		const defaultMsg = `✨ ${prLabel} — no issues, all clear`;
+		const defaultMsg = `✨ ${prLabel} — open, all clear`;
 		const msg = prefs?.allClear
 			? interpolateTemplate(prefs.allClear, makeTemplateVars(config))
 			: defaultMsg;

@@ -1056,7 +1056,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			threadDetails: [], commentDetails: [], checkDetails: [],
 		};
 		const result = formatStatusUpdate(null, clean, config);
-		expect(result).toContain("no issues");
+		expect(result).toContain("all clear");
 	});
 
 	it("sends all-clear when transitioning from issues to clean", () => {
@@ -1078,7 +1078,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			threadDetails: [], commentDetails: [], checkDetails: [],
 		};
 		const result = formatStatusUpdate(hadIssues, clean, config);
-		expect(result).toContain("no issues");
+		expect(result).toContain("all clear");
 	});
 
 	it("does NOT send all-clear again when status is unchanged clean", () => {
@@ -1104,7 +1104,7 @@ describe("formatStatusUpdate does not repeat all-clear on unchanged status", () 
 			threadDetails: [], commentDetails: [], checkDetails: [],
 		};
 		const first = formatStatusUpdate(null, clean, config);
-		expect(first).toContain("no issues");
+		expect(first).toContain("all clear");
 		const second = formatStatusUpdate(clean, clean, config);
 		expect(second).toBe("");
 	});
