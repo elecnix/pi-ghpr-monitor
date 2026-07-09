@@ -157,7 +157,7 @@ describe("Multi-PR architecture structure", () => {
 		expect(src).toContain("interface ActiveMonitor");
 		expect(src).toContain("config: MonitorConfig");
 		expect(src).toContain("controller: AbortController");
-		expect(src).toContain("lastStatus: PRStatus | IssueStatus | null");
+		expect(src).toContain("lastStatus: PRStatus | IssueStatus | RunStatus | null");
 		expect(src).toContain("lastStatusTimestamp: Date | null");
 		expect(src).toContain("backoffSec: number");
 		expect(src).toContain("consecutiveNoChange: number");
@@ -217,7 +217,7 @@ describe("Multi-PR architecture structure", () => {
 	it("formatCurrentStatus lists all monitors", () => {
 		const statusFn = src.slice(
 			src.indexOf("function formatCurrentStatus()"),
-			src.indexOf("function formatCurrentStatus()") + 2000,
+			src.indexOf("// Register the /ghpr-monitor command"),
 		);
 		expect(statusFn).toContain("for (const mon of monitors.values())");
 		expect(statusFn).toContain("lines.join");

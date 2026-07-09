@@ -123,6 +123,24 @@ export const PreferencesSchema = Type.Object(
 					"When true, reminders and periodic nudges re-report all comments and threads, even those already seen. Default false (only report new items).",
 			}),
 		),
+		runQueued: Type.Optional(
+			Type.String({
+				description:
+					"Prompt override for when a watched workflow run transitions to queued. Variables: {owner}, {repo}, {host}, {prLabel}, {prUrl}, {runId}, {runName}, {runNumber}, {runEvent}, {runBranch}, {runUrl}",
+			}),
+		),
+		runInProgress: Type.Optional(
+			Type.String({
+				description:
+					"Prompt override for when a watched workflow run starts running (in_progress). Variables: {owner}, {repo}, {host}, {prLabel}, {prUrl}, {runId}, {runName}, {runNumber}, {runEvent}, {runBranch}, {runUrl}",
+			}),
+		),
+		runCompleted: Type.Optional(
+			Type.String({
+				description:
+					"Prompt override for when a watched workflow run finishes. Variables: {owner}, {repo}, {host}, {prLabel}, {prUrl}, {runId}, {runName}, {runNumber}, {runEvent}, {runStatus}, {runConclusion}, {runBranch}, {runUrl}, {commitOid}, {commitShortOid}, {commitUrl}",
+			}),
+		),
 	},
 	{
 		additionalProperties: false,
@@ -174,6 +192,9 @@ export const DEFAULT_PREFERENCES: Partial<Record<keyof Preferences, string | und
 	descriptionStaleness: undefined,
 	prCreateNudge: DEFAULT_PR_CREATE_NUDGE,
 	ciGreenMerge: "✅ CI is green on {prLabel}. Please merge the pull request.",
+	runQueued: "⏸️ Workflow run {runName} #{runNumber} on {owner}/{repo} is queued",
+	runInProgress: "⏳ Workflow run {runName} #{runNumber} on {owner}/{repo} is now running",
+	runCompleted: "🏁 Workflow run {runName} #{runNumber} on {owner}/{repo} finished: {runConclusion}",
 };
 
 // ---------------------------------------------------------------------------
@@ -228,9 +249,18 @@ export interface TemplateVars {
 	commitAuthor?: string;
 	commitCoauthors?: string;
 	commitMessageHeadline?: string;
+	// Workflow-run related (used by runQueued / runInProgress / runCompleted)
+	runId?: number;
+	runName?: string;
+	runNumber?: number;
+	runEvent?: string;
+	runStatus?: string;
+	runConclusion?: string;
+	runBranch?: string;
+	runUrl?: string;
 }
 
-const TEMPLATE_VAR_RE = /\{(owner|repo|number|host|prLabel|prUrl|unresolvedThreads|generalComments|failingChecks|conflict|intervalSec|reviewAuthor|commitOid|commitShortOid|commitUrl|commitAuthor|commitCoauthors|commitMessageHeadline)\}/g;
+const TEMPLATE_VAR_RE = /\{(owner|repo|number|host|prLabel|prUrl|unresolvedThreads|generalComments|failingChecks|conflict|intervalSec|reviewAuthor|commitOid|commitShortOid|commitUrl|commitAuthor|commitCoauthors|commitMessageHeadline|runId|runName|runNumber|runEvent|runStatus|runConclusion|runBranch|runUrl)\}/g;
 
 /** Non-global version for .test() checks. The /g flag causes .test() to
  *  advance lastIndex across successive calls, producing false negatives.
@@ -282,6 +312,22 @@ export function interpolateTemplate(template: string, vars: TemplateVars): strin
 				return vars.commitCoauthors ?? match;
 			case "commitMessageHeadline":
 				return vars.commitMessageHeadline ?? match;
+			case "runId":
+				return vars.runId !== undefined ? String(vars.runId) : match;
+			case "runName":
+				return vars.runName ?? match;
+			case "runNumber":
+				return vars.runNumber !== undefined ? String(vars.runNumber) : match;
+			case "runEvent":
+				return vars.runEvent ?? match;
+			case "runStatus":
+				return vars.runStatus ?? match;
+			case "runConclusion":
+				return vars.runConclusion ?? match;
+			case "runBranch":
+				return vars.runBranch ?? match;
+			case "runUrl":
+				return vars.runUrl ?? match;
 			default:
 				return match;
 		}

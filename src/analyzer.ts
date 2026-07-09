@@ -196,12 +196,101 @@ export interface MonitorConfig {
 	repo: string;
 	number: number;
 	host: string;
-	resourceType: "pr" | "issue";
+	resourceType: "pr" | "issue" | "run";
 	mode: "all" | "comments" | "conflicts" | "actions";
 	intervalSec: number;
 	debounceSec: number;
 	/** When true, notify the agent to merge the PR once CI passes. Opt-in, false by default. */
 	autoMerge?: boolean;
+	/** GitHub Actions workflow run id. Required when resourceType === "run". */
+	runId?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Workflow-run monitoring types (GitHub Actions)
+// ---------------------------------------------------------------------------
+
+/** Stable snapshot distilled from a GitHub Actions run REST response. */
+export interface RunStatus {
+	runId: number;
+	name: string;
+	displayTitle: string;
+	event: string;
+	/** queued | in_progress | completed */
+	status: string;
+	/** success | failure | timed_out | cancelled | neutral | action_required | stale | skipped — "" while not completed */
+	conclusion: string;
+	headBranch: string;
+	headSha: string;
+	shortSha: string;
+	htmlUrl: string;
+	runNumber: number;
+}
+
+export type RunTransitionType = "run-queued" | "run-in-progress" | "run-completed";
+
+/** A genuinely-new transition between two RunStatus snapshots. */
+export interface RunTransition {
+	type: RunTransitionType;
+	/** Terminal conclusion, set only for run-completed. */
+	conclusion?: string;
+}
+
+/** True when the run has reached its terminal state. */
+export function isRunTerminal(status: RunStatus): boolean {
+	return status.status === "completed";
+}
+
+/** Distill a raw REST run payload into a stable RunStatus snapshot. */
+export function snapshotRun(run: {
+	id: number;
+	name?: string | null;
+	display_title?: string;
+	event?: string;
+	status?: string;
+	conclusion?: string | null;
+	head_branch?: string | null;
+	head_sha?: string;
+	html_url?: string;
+	run_number?: number;
+}): RunStatus {
+	const short = run.head_sha ?? "";
+	return {
+		runId: run.id,
+		name: run.name ?? "",
+		displayTitle: run.display_title ?? "",
+		event: run.event ?? "",
+		status: run.status ?? "",
+		conclusion: run.conclusion ?? "",
+		headBranch: run.head_branch ?? "",
+		headSha: run.head_sha ?? "",
+		shortSha: short.length > 7 ? short.slice(0, 7) : short,
+		htmlUrl: run.html_url ?? "",
+		runNumber: run.run_number ?? 0,
+	};
+}
+
+/**
+ * Diff two RunStatus snapshots, returning genuinely-new transitions.
+ *
+ * First-poll (prev == null) is silent — the caller emits an initial
+ * "monitoring started" message separately. The run reaches a terminal
+ * state when its status becomes "completed"; the conclusion is carried on
+ * the run-completed transition.
+ */
+export function diffRun(prev: RunStatus | null, curr: RunStatus): RunTransition[] {
+	if (!prev) return [];
+	if (prev.status === curr.status) return [];
+	switch (curr.status) {
+		case "completed":
+			return [{ type: "run-completed", conclusion: curr.conclusion }];
+		case "in_progress":
+			return [{ type: "run-in-progress" }];
+		case "queued":
+			return [{ type: "run-queued" }];
+		default:
+			return [];
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1027,13 +1116,25 @@ export function linkifyPRRefs(text: string, defaultHost: string = "github.com", 
  * Shows the PR URL with emoji indicators for each issue type.
  * No emojis when no actionable items.
  */
-export function formatFooterStatus(config: MonitorConfig, status: PRStatus | IssueStatus | null): string {
+export function formatFooterStatus(config: MonitorConfig, status: PRStatus | IssueStatus | RunStatus | null): string {
 	const isIssue = config.resourceType === "issue";
-	const resourceLabel = isIssue
-		? `https://${config.host}/${config.owner}/${config.repo}/issues/${config.number} (issue)`
-		: `https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
+	const isRun = config.resourceType === "run";
+	const resourceLabel = isRun
+		? `https://${config.host}/${config.owner}/${config.repo}/actions/runs/${config.runId}`
+		: isIssue
+			? `https://${config.host}/${config.owner}/${config.repo}/issues/${config.number} (issue)`
+			: `https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
 
 	if (!status) return `📡 ${resourceLabel}`;
+
+	if (isRun) {
+		const run = status as RunStatus;
+		const emoji = run.status === "completed"
+			? (run.conclusion === "success" ? "✅" : "❌")
+			: run.status === "queued" ? "⏸️"
+			: "⏳";
+		return `📡 ${resourceLabel} ${emoji}`;
+	}
 
 	const emojis: string[] = [];
 	if (config.autoMerge && !isIssue) emojis.push("🔀");
@@ -1041,7 +1142,7 @@ export function formatFooterStatus(config: MonitorConfig, status: PRStatus | Iss
 	if ("reviewDecision" in status && (status as PRStatus).reviewDecision === "CHANGES_REQUESTED") emojis.push("⛔");
 	if ("hasConflicts" in status && status.hasConflicts) emojis.push("⚠️");
 	if ("unresolvedThreads" in status && status.unresolvedThreads > 0) emojis.push("💬");
-	if (status.generalComments > 0) emojis.push("💭");
+	if ("generalComments" in status && status.generalComments > 0) emojis.push("💭");
 	if ("failingChecks" in status && status.failingChecks.length > 0) emojis.push("❌");
 	if ("pendingChecks" in status && status.pendingChecks.length > 0) emojis.push("⏳");
 

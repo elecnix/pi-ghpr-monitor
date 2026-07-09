@@ -101,6 +101,7 @@ Or add to your project's `.pi/settings.json`:
 /ghpr-monitor https://github.com/owner/repo/pull/42 Address any CI failure    Start with a message
 /ghpr-monitor owner/repo 42                                                 Start monitoring PR #42
 /ghpr-monitor owner/repo 42 Review all open threads                          Start with a message
+/ghpr-monitor https://github.com/owner/repo/actions/runs/30433642            Watch a single workflow run until it completes
 /ghpr-monitor on                                                            Resume monitoring
 /ghpr-monitor off                                                           Stop monitoring
 ```
@@ -114,10 +115,25 @@ The agent can start monitoring or check status:
 ```
 ghpr-monitor(action="start", url="https://github.com/elecnix/gh-pr-review/pull/42")
 ghpr-monitor(action="start", owner="elecnix", repo="gh-pr-review", pr_number=42)
+ghpr-monitor(action="start", owner="elecnix", repo="gh-pr-review", run_id=30433642)   # watch a single workflow run
 ghpr-monitor(action="status")
 ```
 
-The agent **cannot** stop monitoring — only `/ghpr-monitor off` can do that. This ensures monitoring continues until the PR is merged or you explicitly stop it.
+The agent **cannot** stop monitoring — only `/ghpr-monitor off` can do that. This ensures monitoring continues until the PR is merged, the run completes, or you explicitly stop it.
+
+### Watching a standalone workflow run
+
+Use `run_id` (with `owner`+`repo`, no `pr_number`) — or paste an Actions run URL into `/ghpr-monitor` — to watch a **single GitHub Actions workflow run** until it completes. This is the standalone counterpart to PR CI watching: instead of polling a PR for check suites, it polls `GET /repos/{owner}/{repo}/actions/runs/{run_id}` and emits one notification per genuinely-new status transition, then **auto-stops** when the run's status becomes `completed`.
+
+The run id is the numeric id in a run's URL: `…/actions/runs/<id>`.
+
+| Event | When |
+|------|------|
+| `⏸️ run-queued` | Run transitions to `queued` |
+| `⏳ run-in-progress` | Run starts running (`in_progress`) |
+| `🏁 run-completed` | Run finishes — the notification carries the conclusion (`success`, `failure`, `cancelled`, `timed_out`, `neutral`, …) |
+
+PR/issue monitoring is unchanged; `run_id` is mutually exclusive with `pr_number`/`url`. The notification templates are overridable via the `runQueued`, `runInProgress`, and `runCompleted` preferences.
 
 ### Typical Workflow
 
