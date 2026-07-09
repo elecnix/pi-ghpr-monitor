@@ -27,9 +27,14 @@ import {
 	type PRStatus,
 	type IssueData,
 	type IssueStatus,
+	type RunStatus,
+	type RunTransition,
 	type MonitorConfig,
 	snapshotPR,
 	snapshotIssue,
+	snapshotRun,
+	diffRun,
+	isRunTerminal,
 	formatActionableItems,
 
 	formatFooterStatus,
@@ -37,6 +42,13 @@ import {
 	formatAgentStatusUpdate,
 	linkifyPRRefs,
 } from "./analyzer";
+import {
+	type RunData,
+	type ParsedRun,
+	parseRunUrl,
+	runKey,
+	fetchRunData,
+} from "./run-monitor";
 import {
 	type Preferences,
 	PreferencesSchema,
@@ -312,7 +324,7 @@ export function prKey(a: string | MonitorConfig, b?: string, c?: number, d?: str
 export interface ActiveMonitor {
 	config: MonitorConfig;
 	controller: AbortController;
-	lastStatus: PRStatus | IssueStatus | null;
+	lastStatus: PRStatus | IssueStatus | RunStatus | null;
 	lastStatusTimestamp: Date | null;
 	lastSentUpdate: string | null;
 	lastSentReminder: string | null;
@@ -372,7 +384,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	// For testing: allows reducing the polling interval
 	const MOCK_INTERVAL_SECS = process.env.GHPR_MONITOR_INTERVAL_SECS ? parseInt(process.env.GHPR_MONITOR_INTERVAL_SECS, 10) : undefined;
 
-	const STEERING_PROMPT = `You have access to the ghpr-monitor tool. When the user asks you to watch or monitor a PR, use ghpr-monitor with action "start" to begin monitoring. The tool has actions: start, status, check, merge, and preferences. Multiple PRs can be monitored simultaneously. You must NOT stop monitoring on your own — only the user can stop via /ghpr-monitor off (stops all) or /ghpr-monitor off <PR> (stops specific). The user can also run /ghpr-monitor check to trigger an immediate poll (all PRs or a specific one). You will receive PR status updates as notifications. The url parameter accepts GitHub PR URLs or shorthand like "owner/repo#123". Use action='preferences' to view or customize the notification prompts. Calling with no value shows current preferences (with defaults); providing a value in JSON writes new preferences. Set a key to null to reset it to default. Use action='merge' to toggle auto-merge when CI passes (the monitor will notify you to merge the PR once CI is green).`;
+	const STEERING_PROMPT = `You have access to the ghpr-monitor tool. When the user asks you to watch or monitor a PR, use ghpr-monitor with action "start" to begin monitoring. The tool has actions: start, status, check, merge, and preferences. Multiple PRs/runs can be monitored simultaneously. You must NOT stop monitoring on your own — only the user can stop via /ghpr-monitor off (stops all) or /ghpr-monitor off <PR> (stops specific). The user can also run /ghpr-monitor check to trigger an immediate poll (all PRs or a specific one). You will receive PR status updates as notifications. The url parameter accepts GitHub PR URLs or shorthand like "owner/repo#123". To watch a standalone GitHub Actions workflow run by id, pass run_id with owner+repo (no pr_number): the monitor polls the run until status becomes "completed", then auto-stops and notifies with the conclusion (success, failure, cancelled, etc.). Use action='preferences' to view or customize the notification prompts. Calling with no value shows current preferences (with defaults); providing a value in JSON writes new preferences. Set a key to null to reset it to default. Use action='merge' to toggle auto-merge when CI passes (the monitor will notify you to merge the PR once CI is green).`;
 
 	// Register a custom message renderer for "ghpr-monitor" messages.
 	// This renders only the concise summary in the TUI, while the agent
@@ -594,14 +606,17 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 
 	function startMonitor(config: MonitorConfig): { key: string; message: string; alreadyMonitoring?: boolean } {
 		const isIssue = config.resourceType === "issue";
-		const resourceUrl = isIssue
-			? `https://${config.host}/${config.owner}/${config.repo}/issues/${config.number}`
-			: `https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
-		log(`Starting monitor: ${config.owner}/${config.repo}#${config.number} (interval: ${config.intervalSec}s, mode: ${config.mode}, type: ${config.resourceType})`);
-		const key = prKey(config);
+		const isRun = config.resourceType === "run";
+		const resourceUrl = isRun
+			? `https://${config.host}/${config.owner}/${config.repo}/actions/runs/${config.runId}`
+			: isIssue
+				? `https://${config.host}/${config.owner}/${config.repo}/issues/${config.number}`
+				: `https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
+		const logTarget = isRun ? `run ${config.runId}` : `#${config.number}`;
+		log(`Starting monitor: ${config.owner}/${config.repo} ${logTarget} (interval: ${config.intervalSec}s, mode: ${config.mode}, type: ${config.resourceType})`);
+		const key = isRun ? runKey(config) : prKey(config);
 
 		if (monitors.has(key)) {
-			const existing = monitors.get(key)!;
 			return {
 				key,
 				message: `Already monitoring ${resourceUrl}. Use /ghpr-monitor off ${key} to stop.`,
@@ -613,8 +628,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		monitors.set(key, mon);
 		updateFooter();
 
-		const loop = isIssue ? pollIssueLoop : pollLoop;
-		const resourceLabel = isIssue ? "Issue" : "PR";
+		const loop = isRun ? pollRunLoop : (isIssue ? pollIssueLoop : pollLoop);
+		const resourceLabel = isRun ? "Run" : (isIssue ? "Issue" : "PR");
 		loop(mon).catch((err) => {
 			if (mon.controller.signal.aborted) return;
 			const fatalErrMsg = `${resourceLabel} monitor error for ${key}: ${err instanceof Error ? err.message : String(err)}`;
@@ -641,7 +656,12 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		const config = mon.config;
 		monitors.delete(key);
 		updateFooter();
-		return `Stopped monitoring https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
+		const resourceUrl = config.resourceType === "run"
+			? `https://${config.host}/${config.owner}/${config.repo}/actions/runs/${config.runId}`
+			: config.resourceType === "issue"
+				? `https://${config.host}/${config.owner}/${config.repo}/issues/${config.number}`
+				: `https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
+		return `Stopped monitoring ${resourceUrl}`;
 	}
 
 	function stopAllMonitors(): string {
@@ -1058,6 +1078,149 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		}
 	}
 
+	// Poll loop for a standalone GitHub Actions workflow run. Watches a single
+	// run by id (GET /repos/{owner}/{repo}/actions/runs/{run_id}) until its
+	// status becomes "completed", emitting one notification per genuinely-new
+	// status transition (queued → in_progress → completed) and then
+	// auto-stopping — the run-monitor counterpart to the PR loop's
+	// merged/closed exit. Mirrors gh-monitor#18.
+	async function pollRunLoop(mon: ActiveMonitor): Promise<void> {
+		const { config, controller } = mon;
+		const signal = controller.signal;
+
+		const runLabel = () => `${config.owner}/${config.repo} run #${config.runId}`;
+		const runUrl = () => `https://${config.host}/${config.owner}/${config.repo}/actions/runs/${config.runId}`;
+
+		// Initial monitoring message. A custom firstPoll preference is honored;
+		// the default message names the run explicitly.
+		const defaultInitialMsg = `📡 Monitoring ${runLabel()} (workflow run, polling every ${config.intervalSec}s)`;
+		const initialMsg = currentPreferences.firstPoll
+			? interpolateTemplate(currentPreferences.firstPoll, {
+				owner: config.owner, repo: config.repo, number: config.runId ?? 0, host: config.host,
+				prLabel: runLabel(), prUrl: runUrl(), intervalSec: config.intervalSec,
+			})
+			: defaultInitialMsg;
+		const linkifiedInitialMsg = linkifyPRRefs(initialMsg, config.host);
+		pi.sendMessage({
+			customType: "ghpr-monitor",
+			content: linkifiedInitialMsg,
+			display: true,
+			details: { concise: linkifiedInitialMsg, action: "start", owner: config.owner, repo: config.repo, runId: config.runId },
+		});
+
+		const buildVars = (status: RunStatus, conclusionOverride?: string) => ({
+			owner: config.owner,
+			repo: config.repo,
+			number: config.runId ?? 0,
+			host: config.host,
+			prLabel: status ? `${config.owner}/${config.repo} run #${status.runNumber}` : runLabel(),
+			prUrl: status?.htmlUrl || runUrl(),
+			runId: status?.runId ?? config.runId,
+			runName: status?.name ?? "",
+			runNumber: status?.runNumber ?? 0,
+			runEvent: status?.event ?? "",
+			runStatus: status?.status ?? "",
+			runConclusion: conclusionOverride ?? status?.conclusion ?? "",
+			runBranch: status?.headBranch ?? "",
+			runUrl: status?.htmlUrl || runUrl(),
+			commitOid: status?.headSha,
+			commitShortOid: status?.shortSha,
+			commitUrl: status?.headSha ? `https://${config.host}/${config.owner}/${config.repo}/commit/${status.headSha}` : undefined,
+		});
+
+		const renderTransition = (t: RunTransition, status: RunStatus): { concise: string; detailed: string } => {
+			const vars = buildVars(status, t.conclusion);
+			let msg: string;
+			if (t.type === "run-queued") {
+				msg = getPreferenceWithDefault("runQueued", currentPreferences, vars, `⏸️ Workflow run ${status.name} #${status.runNumber} on ${config.owner}/${config.repo} is queued`);
+			} else if (t.type === "run-in-progress") {
+				msg = getPreferenceWithDefault("runInProgress", currentPreferences, vars, `⏳ Workflow run ${status.name} #${status.runNumber} on ${config.owner}/${config.repo} is now running`);
+			} else {
+				const conclusion = t.conclusion || status.conclusion || "unknown";
+				msg = getPreferenceWithDefault("runCompleted", currentPreferences, vars, `🏁 Workflow run ${status.name} #${status.runNumber} on ${config.owner}/${config.repo} finished: ${conclusion}`);
+			}
+			return { concise: msg, detailed: msg };
+		};
+
+		for (;;) {
+			if (signal.aborted) return;
+
+			try {
+				const data = await fetchRunData(config, signal, mockBaseUrl);
+				log(`Fetched workflow run ${config.owner}/${config.repo} run ${config.runId}: status=${data.status} conclusion=${data.conclusion}`);
+				const curr = snapshotRun(data);
+				const prev = mon.lastStatus as RunStatus | null;
+				const firstPoll = prev === null;
+
+				// Emit one notification per genuinely-new status transition
+				let completionEmitted = false;
+				const transitions = diffRun(prev, curr);
+				for (const t of transitions) {
+					const { concise, detailed } = renderTransition(t, curr);
+					if (agentTurnActive) {
+						queuedForceChecks.push({ concise, detailed, host: config.host, monitorKey: runKey(config) });
+					} else {
+						sendPRNotification(concise, detailed, { deliverAs: "steer", host: config.host });
+					}
+					if (t.type === "run-completed") completionEmitted = true;
+				}
+
+				// Auto-stop on terminal state. If the run was already completed on the
+				// very first poll (no transition was diffed), surface the completion now.
+				if (isRunTerminal(curr)) {
+					if (firstPoll && !completionEmitted) {
+						const { concise, detailed } = renderTransition({ type: "run-completed", conclusion: curr.conclusion }, curr);
+						sendPRNotification(concise, detailed, { deliverAs: "steer", host: config.host });
+					}
+					mon.lastStatus = curr;
+					mon.lastStatusTimestamp = new Date();
+					const key = runKey(config);
+					monitors.delete(key);
+					updateFooter();
+					return;
+				}
+
+				mon.lastStatus = curr;
+				mon.lastStatusTimestamp = new Date();
+				mon.backoffSec = 0;
+				updateFooter();
+			} catch (err) {
+				if (signal.aborted) return;
+				const errMsg = err instanceof Error ? err.message : String(err);
+				const isRateLimit = /rate limit/i.test(errMsg);
+				mon.backoffSec = mon.backoffSec === 0
+					? config.intervalSec
+					: Math.min(mon.backoffSec * 2, MAX_BACKOFF_SEC);
+				const pollErrMsg = isRateLimit
+					? `Rate limited on ${runLabel()}, backing off ${mon.backoffSec}s`
+					: `Poll error for ${runLabel()}: ${errMsg}${mon.backoffSec > config.intervalSec ? ` (retrying in ${mon.backoffSec}s)` : ""}`;
+				log(pollErrMsg);
+				uiCtx?.notify(pollErrMsg, "warning");
+			}
+
+			// Wait for interval (abortable), with backoff after any error
+			const waitSec = mon.backoffSec > 0 ? mon.backoffSec : config.intervalSec;
+			await new Promise<void>((resolve) => {
+				mon.pollWakeResolve = resolve;
+				const timer = setTimeout(() => {
+					mon.pollWakeResolve = null;
+					resolve();
+				}, waitSec * 1000);
+				signal.addEventListener(
+					"abort",
+					() => {
+						clearTimeout(timer);
+						mon.pollWakeResolve = null;
+						resolve();
+					},
+					{ once: true },
+				);
+			});
+
+			if (signal.aborted) return;
+		}
+	}
+
 	// Build detailed status lines for display (shared by /ghpr-monitor status command
 	// and ghpr-monitor tool action='status')
 	function buildDetailedStatusLines(): string[] {
@@ -1066,9 +1229,13 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		for (const [key, mon] of monitors) {
 			const ts = mon.lastStatusTimestamp ? mon.lastStatusTimestamp.toLocaleString() : "unknown";
 			const isIssue = mon.config.resourceType === "issue";
+			const isRun = mon.config.resourceType === "run";
 			if (mon.lastStatus) {
 				const s = mon.lastStatus;
-				if (isIssue) {
+				if (isRun) {
+					const runStatus = s as RunStatus;
+					lines.push(`${key} (run): status: ${runStatus.status}, conclusion: ${runStatus.conclusion || "—"} (last checked: ${ts})`);
+				} else if (isIssue) {
 					const issueStatus = s as IssueStatus;
 					lines.push(`${key} (issue): ${issueStatus.generalComments} comments, state: ${issueStatus.state} (last checked: ${ts})`);
 				} else {
@@ -1089,16 +1256,23 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		for (const mon of monitors.values()) {
 			const c = mon.config;
 			const isIssue = c.resourceType === "issue";
-			const resourceUrl = isIssue
-				? `https://${c.host}/${c.owner}/${c.repo}/issues/${c.number}`
-				: `https://${c.host}/${c.owner}/${c.repo}/pull/${c.number}`;
-			const autoMergeTag = c.autoMerge && !isIssue ? " 🔀auto-merge" : "";
+			const isRun = c.resourceType === "run";
+			const resourceUrl = isRun
+				? `https://${c.host}/${c.owner}/${c.repo}/actions/runs/${c.runId}`
+				: isIssue
+					? `https://${c.host}/${c.owner}/${c.repo}/issues/${c.number}`
+					: `https://${c.host}/${c.owner}/${c.repo}/pull/${c.number}`;
+			const autoMergeTag = c.autoMerge && !isIssue && !isRun ? " 🔀auto-merge" : "";
 			const header = `Monitoring ${resourceUrl} (mode: ${c.mode}, interval: ${c.intervalSec}s${autoMergeTag})`;
 			if (!mon.lastStatus) {
 				lines.push(`${header}\n  No status update received yet.`);
 			} else {
 				const ts = mon.lastStatusTimestamp ? mon.lastStatusTimestamp.toLocaleString() : "unknown";
-				if (isIssue) {
+				if (isRun) {
+					const runStatus = mon.lastStatus as RunStatus;
+					const conclusion = runStatus.conclusion ? `, conclusion: ${runStatus.conclusion}` : "";
+					lines.push(`${header}\n  Workflow run status: ${runStatus.status}${conclusion}\n  Last checked: ${ts}`);
+				} else if (isIssue) {
 					const issueStatus = mon.lastStatus as IssueStatus;
 					const commentCount = issueStatus.generalComments ?? 0;
 					if (commentCount > 0) {
@@ -1316,6 +1490,29 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				return;
 			}
 
+			// Try parsing as a GitHub Actions run URL
+			const runParsed = parseRunUrl(raw);
+			if (runParsed) {
+				const config: MonitorConfig = {
+					owner: runParsed.owner,
+					repo: runParsed.repo,
+					number: 0,
+					host: runParsed.host,
+					resourceType: "run",
+					mode: "all",
+					intervalSec: MOCK_INTERVAL_SECS ? Math.max(1, MOCK_INTERVAL_SECS) : 60,
+					debounceSec: 30,
+					runId: runParsed.runId,
+				};
+				const result = startMonitor(config);
+				if (result.alreadyMonitoring) {
+					ctx.ui.notify(result.message, "warning");
+				} else {
+					ctx.ui.notify(result.message, "info");
+				}
+				return;
+			}
+
 			// Try parsing as a PR URL
 			const parsed = parsePRUrl(raw);
 			if (parsed) {
@@ -1401,7 +1598,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			}
 
 			ctx.ui.notify(
-				"Usage:\n  /ghpr-monitor ! | start — monitor current branch's PR (injects prompt for LLM)\n  /ghpr-monitor <PR URL> — paste a GH PR URL (TUI-only, no LLM turn)\n  /ghpr-monitor owner/repo#123\n  /ghpr-monitor owner/repo <pr-number> [message]\n  /ghpr-monitor check [PR] — check now (all or specific)\n  /ghpr-monitor merge [PR] — toggle auto-merge when CI passes\n  /ghpr-monitor off [PR] — stop monitoring (all or specific)",
+				"Usage:\n  /ghpr-monitor ! | start — monitor current branch's PR (injects prompt for LLM)\n  /ghpr-monitor <PR URL> — paste a GH PR URL (TUI-only, no LLM turn)\n  /ghpr-monitor owner/repo#123\n  /ghpr-monitor owner/repo <pr-number> [message]\n  /ghpr-monitor <Actions run URL> — watch a single workflow run until it completes\n  /ghpr-monitor check [PR] — check now (all or specific)\n  /ghpr-monitor merge [PR] — toggle auto-merge when CI passes\n  /ghpr-monitor off [PR] — stop monitoring (all or specific)",
 				"info",
 			);
 		},
@@ -1417,16 +1614,23 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		// Direct key match (e.g. "owner/repo#123")
 		if (monitors.has(trimmed)) return trimmed;
 
-		// Try parsing as PR URL, issue URL, or shorthand
+		// Try parsing as PR URL, issue URL, run URL, or shorthand
 		const parsed = parseIssueUrl(trimmed) || parsePRUrl(trimmed) || parsePRShorthand(trimmed);
 		if (parsed) {
 			const key = prKey(parsed.owner, parsed.repo, parsed.number, parsed.host);
 			if (monitors.has(key)) return key;
 		}
 
-		// Try partial match (e.g. just the number)
+		// Try parsing as a workflow run URL or run key
+		const runParsed = parseRunUrl(trimmed);
+		if (runParsed) {
+			const key = runKey(runParsed.owner, runParsed.repo, runParsed.runId, runParsed.host);
+			if (monitors.has(key)) return key;
+		}
+
+		// Try partial match (e.g. just the number, or a run id)
 		for (const key of monitors.keys()) {
-			if (key.endsWith(`#${trimmed}`) || key === trimmed) return key;
+			if (key.endsWith(`#${trimmed}`) || key.endsWith(`@run/${trimmed}`) || key === trimmed) return key;
 		}
 
 		return null;
@@ -1442,6 +1646,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		owner: Type.Optional(Type.String({ description: "Repository owner (e.g. 'v2nic')" })),
 		repo: Type.Optional(Type.String({ description: "Repository name (e.g. 'gh-pr-review')" })),
 		pr_number: Type.Optional(Type.Number({ description: "Pull request number" })),
+		run_id: Type.Optional(Type.Number({ description: "GitHub Actions workflow run id to monitor (watches a single run until it completes). Mutually exclusive with pr_number/url; requires owner+repo." })),
 		mode: Type.Optional(Type.Union([Type.Literal("all"), Type.Literal("comments"), Type.Literal("conflicts"), Type.Literal("actions")])),
 		interval: Type.Optional(Type.Number({ description: "Polling interval in seconds (default: 60, minimum: 10)" })),
 		value: Type.Optional(Type.String({ description: "For preferences action: JSON string with preference overrides. Omit to read current preferences." })),
@@ -1451,13 +1656,14 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		name: "ghpr-monitor",
 		label: "GH PR Monitor",
 		description:
-			"Monitor GitHub pull requests for comments, conflicts, and CI status changes. Supports monitoring multiple PRs simultaneously. Use action='start' with a 'url' (GitHub PR URL) or with owner+repo+pr_number to begin monitoring. Use action='status' to list all currently monitored PRs. Use action='check' to trigger an immediate poll. Use action='preferences' to view or update notification prompt preferences. The agent cannot stop monitoring — only the user can stop via /ghpr-monitor off.",
+			"Monitor GitHub pull requests for comments, conflicts, and CI status changes, or watch a standalone GitHub Actions workflow run by run_id. Supports monitoring multiple PRs/runs simultaneously. Use action='start' with a 'url' (GitHub PR URL) or with owner+repo+pr_number to begin monitoring a PR. Use action='start' with run_id plus owner+repo to watch a single workflow run until it completes — the monitor polls GET /repos/{owner}/{repo}/actions/runs/{run_id} and auto-stops when status becomes 'completed', emitting a notification with the conclusion. Use action='status' to list all currently monitored PRs/runs. Use action='check' to trigger an immediate poll. Use action='preferences' to view or update notification prompt preferences. The agent cannot stop monitoring — only the user can stop via /ghpr-monitor off.",
 		promptSnippet: "Monitor GitHub PRs for changes (comments, conflicts, CI failures)",
 		promptGuidelines: [
 			"When the user asks you to watch or monitor a PR, use ghpr-monitor with action='start'.",
 			"Multiple PRs can be monitored at the same time — start a new monitor without stopping existing ones.",
 			"Accept a GitHub PR URL, shorthand like 'owner/repo#123', or separate owner/repo/pr_number.",
-			"Use action='status' to see all currently monitored PRs.",
+			"To watch a standalone GitHub Actions workflow run, pass run_id with owner+repo (no pr_number). The monitor polls the run until status == 'completed', then auto-stops and notifies with the conclusion (success, failure, cancelled, etc.).",
+			"Use action='status' to see all currently monitored PRs/runs.",
 			"Use action='check' to trigger an immediate poll.",
 			"Use action='merge' to toggle auto-merge when CI passes (if not disabled by disableMergeTool preference). When enabled, the monitor will notify you to merge the PR once CI turns green.",
 			"Use action='preferences' to view current preferences or update them with a value parameter.",
@@ -1527,6 +1733,39 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 
 			switch (params.action) {
 				case "start": {
+					// Standalone workflow-run monitoring: run_id is mutually exclusive with the
+					// PR/issue selector. When provided, build a run config directly.
+					if (params.run_id) {
+						if (!params.owner || !params.repo) {
+							return {
+								content: [{ type: "text", text: "run_id requires owner and repo. Example: ghpr-monitor(action='start', owner='owner', repo='repo', run_id=30433642)" }],
+								details: { action: "start", status: "missing_params", target: "run" },
+							};
+						}
+						const host = "github.com"; // owner/repo form is github.com; enterprise runs use a URL
+						const config: MonitorConfig = {
+							owner: params.owner,
+							repo: params.repo,
+							number: 0,
+							host,
+							resourceType: "run",
+							mode: params.mode || "all",
+							intervalSec: MOCK_INTERVAL_SECS ? Math.max(1, MOCK_INTERVAL_SECS) : Math.max(10, params.interval || 60),
+							debounceSec: 30,
+							runId: params.run_id,
+						};
+						const result = startMonitor(config);
+						return {
+							content: [{ type: "text", text: result.message }],
+							details: {
+								action: "start",
+								status: result.alreadyMonitoring ? "already_running" : "started",
+								config,
+								activeMonitors: monitors.size,
+							},
+						};
+					}
+
 					const resolved = resolvePR();
 					if ("error" in resolved) {
 						return {
@@ -1592,7 +1831,35 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 						};
 					}
 
-					// If a specific PR is specified, only check that one
+					// If a specific target is specified, only check that one
+					if (params.run_id) {
+						if (!params.owner || !params.repo) {
+							return {
+								content: [{ type: "text", text: "run_id requires owner and repo." }],
+								details: { action: "check", status: "missing_params", target: "run" },
+							};
+						}
+						const key = runKey(params.owner, params.repo, params.run_id);
+						const mon = monitors.get(key);
+						if (!mon) {
+							return {
+								content: [{ type: "text", text: `Not monitoring ${key}. Currently monitoring: ${[...monitors.keys()].join(", ")}` }],
+								details: { action: "check", status: "not_found", target: "run" },
+							};
+						}
+						mon.backoffSec = 0;
+						mon.consecutiveNoChange = 0;
+						mon.forceNotify = true;
+						if (mon.pollWakeResolve) {
+							mon.pollWakeResolve();
+							mon.pollWakeResolve = null;
+						}
+						return {
+							content: [{ type: "text", text: `Checking ${key} now...` }],
+							details: { action: "check", status: "triggered", config: mon.config },
+						};
+					}
+
 					if (params.url || params.owner) {
 						const resolved = resolvePR();
 						if ("error" in resolved) {
