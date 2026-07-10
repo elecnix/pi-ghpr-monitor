@@ -56,7 +56,7 @@ function writeMockGhMonitorBinary(): string {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mock-ghmon-"));
 	const file = path.join(dir, "mock-gh-monitor");
 	const script = `#!/usr/bin/env node
-const events = JSON.parse(process.env.GH_MONITOR_MOCK_EVENTS || "[]");
+const events = ${JSON.stringify(MOCK_EVENTS)};
 const args = process.argv.slice(2);
 let ownerRepo = "", number = "", interval = "60";
 for (let i = 0; i < args.length; i++) {
@@ -276,7 +276,7 @@ async function main() {
 	// canned event sequence. The adapter shells out to that binary instead of
 	// the real `gh monitor`.
 	console.log("4. Starting Pi agent in tmux...");
-	const mockEnv = `GH_MONITOR_BIN=${mockBin} GH_MONITOR_MOCK_EVENTS=${JSON.stringify(JSON.stringify(MOCK_EVENTS))}`;
+	const mockEnv = `GH_MONITOR_BIN=${mockBin}`;
 	tmuxSend(
 		PI_SESSION,
 		`cd ${projectDir} && PI_CODING_AGENT_DIR=${PI_DIR} PI_OFFLINE=1 ${mockEnv} GHPR_MONITOR_INTERVAL_SECS=${POLL_INTERVAL_SECS} npx pi --provider mock --model mock-llm --no-session --extension ./dist/index.js`,
