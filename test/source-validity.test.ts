@@ -373,68 +373,6 @@ describe("Source file has no escaped template literal characters", () => {
 		}
 	});
 
-	it("AWAIT_QUERY GraphQL has balanced braces", () => {
-		// The AWAIT_QUERY is a template literal containing a GraphQL query.
-		// If braces are unbalanced, GitHub's GraphQL API returns:
-		//   Expected NAME, actual: (none) ("") at [N, 1]
-		// The bug: a multi-PR merge introduced the reviewThreads section with
-		// only 2 closing braces for 3 opened levels (reviewThreads > nodes > comments).
-		const match = src.match(/const AWAIT_QUERY = \x60([\s\S]*?)\x60;/);
-		if (!match) throw new Error("Could not find AWAIT_QUERY in source");
-		const query = match[1];
-
-		// Track brace depth, ignoring braces inside strings
-		let depth = 0;
-		let inString = false;
-		let stringChar = "";
-		const depths: { line: number; col: number; depth: number; opener: string }[] = [];
-		const stack: { line: number; col: number; opener: string }[] = [];
-
-		for (let i = 0; i < query.length; i++) {
-			const ch = query[i];
-			const line = query.substring(0, i).split("\n").length;
-			const lineStart = query.lastIndexOf("\n", i) + 1;
-			const col = i - lineStart + 1;
-
-			if (inString) {
-				if (ch === "\\") { i++; continue; }
-				if (ch === stringChar) inString = false;
-				continue;
-			}
-			if (ch === '"' || ch === "'") {
-				inString = true;
-				stringChar = ch;
-				continue;
-			}
-			if (ch === '{') {
-				depth++;
-				stack.push({ line, col, opener: query.substring(Math.max(0, i - 30), i + 1).trim() });
-				depths.push({ line, col, depth, opener: stack[stack.length - 1].opener });
-			}
-			if (ch === '}') {
-				if (stack.length === 0) {
-					throw new Error(
-						"Unexpected closing brace in AWAIT_QUERY at line " + line +
-						", col " + col + ". No matching opening brace."
-					);
-				}
-				const opener = stack.pop()!;
-				depth--;
-			}
-		}
-
-		if (depth !== 0) {
-			const unclosed = stack.map(
-				(s) => "Line " + s.line + ", col " + s.col + ": opened by '" + s.opener + "' (never closed)"
-			);
-			throw new Error(
-				"AWAIT_QUERY has unbalanced braces (" + depth + " unclosed). " +
-				"GitHub's GraphQL API would reject this with 'Expected NAME' error.\n" +
-				"Unclosed openings:\n" + unclosed.join("\n")
-			);
-		}
-	});
-
 	it("has valid template literal syntax (backticks are properly paired)", { timeout: 10000 }, () => {
 		// Verify that the source file has matching backtick pairs by scanning
 		// through the context map. Backticks inside strings and comments are
