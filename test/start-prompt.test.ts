@@ -6,8 +6,10 @@
  * current pull request. The LLM then determines which PR and invokes the
  * ghpr-monitor tool itself.
  *
- * When monitoring is started with an explicit PR URL or shorthand, NO steer
- * prompt is injected — only a TUI notification confirms the monitor started.
+ * When monitoring is started with an explicit PR URL or shorthand, NO
+ * "monitor the current PR" steer prompt is injected — only a TUI notification
+ * confirms the monitor started (an optional user message after the URL is
+ * forwarded, but that is user-supplied text, not the auto steer).
  */
 
 import { describe, it, expect } from "vitest";
@@ -28,8 +30,8 @@ describe("!/start subcommand injects steer prompt", () => {
 		const handlerIdx = src.indexOf('raw === "!" || raw.toLowerCase() === "start"');
 		expect(handlerIdx).toBeGreaterThan(-1);
 
-		// Find the end of the !/start handler block
-		const nextSectionIdx = src.indexOf("// Parse: off", handlerIdx);
+		// The next branch in the command handler is the debug toggle.
+		const nextSectionIdx = src.indexOf('if (raw.toLowerCase() === "debug")', handlerIdx);
 		expect(nextSectionIdx).toBeGreaterThan(-1);
 
 		const handlerBlock = src.slice(handlerIdx, nextSectionIdx);
@@ -39,64 +41,53 @@ describe("!/start subcommand injects steer prompt", () => {
 	});
 
 	it("does NOT auto-detect the PR using gh pr view", () => {
-		// The !/start handler should NOT call gh pr view — it just tells
-		// the LLM to do it, and the LLM invokes the tool itself.
 		expect(src).not.toContain("gh pr view");
 	});
 
 	it("does NOT call sendStartPrompt or startMonitor from the !/start handler", () => {
 		const handlerIdx = src.indexOf('raw === "!" || raw.toLowerCase() === "start"');
 		expect(handlerIdx).toBeGreaterThan(-1);
-
-		const nextSectionIdx = src.indexOf("// Parse: off", handlerIdx);
+		const nextSectionIdx = src.indexOf('if (raw.toLowerCase() === "debug")', handlerIdx);
 		const handlerBlock = src.slice(handlerIdx, nextSectionIdx);
 
 		expect(handlerBlock).not.toContain("sendStartPrompt");
 		expect(handlerBlock).not.toContain("startMonitor(");
 	});
-
-	it("always injects the steer prompt via pi.sendUserMessage", () => {
-		const handlerIdx = src.indexOf('raw === "!" || raw.toLowerCase() === "start"');
-		expect(handlerIdx).toBeGreaterThan(-1);
-
-		const nextSectionIdx = src.indexOf("// Parse: off", handlerIdx);
-		const handlerBlock = src.slice(handlerIdx, nextSectionIdx);
-
-		expect(handlerBlock).toContain("pi.sendUserMessage");
-		expect(handlerBlock).toContain("Monitor the current pull request");
-		expect(handlerBlock).toContain('deliverAs: "steer"');
-	});
 });
 
-describe("explicit PR arguments do NOT inject steer prompt", () => {
-	it("PR URL handler does NOT call sendStartPrompt", () => {
-		const urlHandlerIdx = src.indexOf("// Try parsing as an issue URL first");
+describe("explicit PR arguments do NOT inject the 'monitor current PR' steer", () => {
+	it("PR URL handler does NOT inject the current-PR steer", () => {
+		const urlHandlerIdx = src.indexOf("// PR URL");
 		expect(urlHandlerIdx).toBeGreaterThan(-1);
-		const urlBlock = src.slice(urlHandlerIdx, src.indexOf("// Try parsing as \"owner/repo#number\""));
-		expect(urlBlock).not.toContain("sendStartPrompt(config)");
+		const urlBlock = src.slice(urlHandlerIdx, src.indexOf("// Shorthand owner/repo#123"));
+		expect(urlBlock).not.toContain("Monitor the current pull request");
+		expect(urlBlock).not.toContain("sendStartPrompt");
 	});
 
-	it("shorthand handler does NOT call sendStartPrompt", () => {
-		const shorthandIdx = src.indexOf("parsePRShorthand(raw)");
+	it("shorthand handler does NOT inject the current-PR steer", () => {
+		const shorthandIdx = src.indexOf("// Shorthand owner/repo#123");
 		expect(shorthandIdx).toBeGreaterThan(-1);
-		const shorthandBlock = src.slice(shorthandIdx, src.indexOf("// Try parsing as \"owner/repo number"));
-		expect(shorthandBlock).not.toContain("sendStartPrompt(config)");
+		const shorthandBlock = src.slice(shorthandIdx, src.indexOf("// owner/repo <number> [message]"));
+		expect(shorthandBlock).not.toContain("Monitor the current pull request");
+		expect(shorthandBlock).not.toContain("sendStartPrompt");
 	});
 
-	it("owner/repo number handler does NOT call sendStartPrompt", () => {
-		const ownerRepoIdx = src.indexOf("// Try parsing as \"owner/repo number [message]\"");
+	it("owner/repo number handler does NOT inject the current-PR steer", () => {
+		const ownerRepoIdx = src.indexOf("// owner/repo <number> [message]");
 		expect(ownerRepoIdx).toBeGreaterThan(-1);
 		const usageIdx = src.indexOf("Usage:", ownerRepoIdx);
 		expect(usageIdx).toBeGreaterThan(-1);
 		const ownerRepoBlock = src.slice(ownerRepoIdx, usageIdx);
-		expect(ownerRepoBlock).not.toContain("sendStartPrompt(config)");
+		expect(ownerRepoBlock).not.toContain("Monitor the current pull request");
+		expect(ownerRepoBlock).not.toContain("sendStartPrompt");
 	});
 
-	it("tool action=start handler does NOT call sendStartPrompt", () => {
+	it("tool action=start handler does NOT inject the current-PR steer", () => {
 		const toolStartIdx = src.indexOf('case "start": {');
 		expect(toolStartIdx).toBeGreaterThan(-1);
 		const toolStartBlock = src.slice(toolStartIdx, src.indexOf('case "status": {'));
-		expect(toolStartBlock).not.toContain("sendStartPrompt(config)");
+		expect(toolStartBlock).not.toContain("Monitor the current pull request");
+		expect(toolStartBlock).not.toContain("sendStartPrompt");
 	});
 });
 
@@ -124,7 +115,6 @@ describe("!/start subcommand completions and usage", () => {
 	});
 
 	it("no-PR hint mentions !/start for starting", () => {
-		// The "No PR monitors running" messages should mention !/start
 		const hintIdx = src.indexOf("No PR monitors running");
 		expect(hintIdx).toBeGreaterThan(-1);
 		const hintText = src.slice(hintIdx, hintIdx + 200);

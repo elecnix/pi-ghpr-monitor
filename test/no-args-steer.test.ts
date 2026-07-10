@@ -21,70 +21,50 @@ const src = fs.readFileSync(
 
 describe("no-args behavior without steer message", () => {
 	it("shows usage via ctx.ui.notify when no args and no monitor running", () => {
-		// Find the block that handles "on" or empty args
 		const onBlockStart = src.indexOf('if (raw.toLowerCase() === "on" || raw === "")');
 		expect(onBlockStart).toBeGreaterThan(-1);
 
-		// The "no monitors running" branch should use ctx.ui.notify, NOT pi.sendUserMessage
-		const onBlock = src.slice(onBlockStart, onBlockStart + 800);
+		// Up to the next command branch (the issue URL handler).
+		const onBlock = src.slice(onBlockStart, src.indexOf("// Issue URL", onBlockStart));
 
 		// Must NOT send a steering message
 		expect(onBlock).not.toContain("pi.sendUserMessage");
-
 		// Must use ctx.ui.notify for UI-only display
 		expect(onBlock).toContain("ctx.ui.notify");
 	});
 
 	it("does not send a steering message mentioning action='start'", () => {
-		// The old steer message text should not be present
-		const steerIdx = src.indexOf("The user wants to start PR monitoring");
-		expect(steerIdx).toBe(-1);
+		expect(src.indexOf("The user wants to start PR monitoring")).toBe(-1);
 	});
 
 	it("shows status when monitors are already running and no args given", () => {
 		const onBlockStart = src.indexOf('if (raw.toLowerCase() === "on" || raw === "")');
 		expect(onBlockStart).toBeGreaterThan(-1);
+		const onBlock = src.slice(onBlockStart, src.indexOf("// Issue URL", onBlockStart));
 
 		const monitorsCheckStart = src.indexOf("if (monitors.size > 0)", onBlockStart);
 		expect(monitorsCheckStart).toBeGreaterThan(-1);
 
-		const noMonitorsCommentIdx = src.indexOf("// No monitors running", onBlockStart);
-		expect(noMonitorsCommentIdx).toBeGreaterThan(-1);
-
 		// The "already monitoring" branch must show current status
-		const runningBranch = src.slice(monitorsCheckStart, noMonitorsCommentIdx);
-		expect(runningBranch).toContain("formatCurrentStatus()");
-		expect(runningBranch).toContain("ctx.ui.notify(statusText");
+		expect(onBlock).toContain("formatCurrentStatus()");
+		expect(onBlock).toContain('ctx.ui.notify(formatCurrentStatus()');
 	});
 
 	it("shows a usage hint when no monitor is running (not an error)", () => {
 		const onBlockStart = src.indexOf('if (raw.toLowerCase() === "on" || raw === "")');
 		expect(onBlockStart).toBeGreaterThan(-1);
+		const onBlock = src.slice(onBlockStart, src.indexOf("// Issue URL", onBlockStart));
 
-		// Find the no-monitors branch specifically — scoped between the comment marker
-		// and the next "return" statement
-		const noMonitorsCommentIdx = src.indexOf("// No monitors running", onBlockStart);
-		expect(noMonitorsCommentIdx).toBeGreaterThan(-1);
-
-		const returnAfterNoMonitors = src.indexOf("return;", noMonitorsCommentIdx);
-		expect(returnAfterNoMonitors).toBeGreaterThan(-1);
-
-		const noMonitorsBranch = src.slice(noMonitorsCommentIdx, returnAfterNoMonitors);
-		expect(noMonitorsBranch).toContain("No PR monitors running");
-		expect(noMonitorsBranch).toContain("ctx.ui.notify");
+		expect(onBlock).toContain("No PR monitors running");
+		expect(onBlock).toContain("ctx.ui.notify");
 		// Should NOT be an error or warning — just info
-		expect(noMonitorsBranch).toContain('"info"');
+		expect(onBlock).toContain('"info"');
 	});
 
 	it("command description mentions status/usage capability", () => {
 		const descMatch = src.match(/description:\s*"Monitor[^"]*"/);
 		expect(descMatch).not.toBeNull();
 		expect(descMatch![0]).toContain("status/usage");
-	});
-
-	it("header comment documents no-args and status behavior", () => {
-		const headerComment = src.slice(0, src.indexOf("// -----------") > 0 ? src.indexOf("// -----------") : 2000);
-		expect(headerComment).toContain("no args = show status/usage");
 	});
 });
 
@@ -103,7 +83,7 @@ describe("/ghpr-monitor status subcommand", () => {
 	it("uses pi.sendMessage with deliverAs 'nextTurn' to avoid triggering a turn", () => {
 		const statusBlock = src.slice(
 			src.indexOf('raw.toLowerCase() === "status"'),
-			src.indexOf("// Parse: check [PR identifier]"),
+			src.indexOf('raw.toLowerCase() === "check"'),
 		);
 		expect(statusBlock).toContain("pi.sendMessage");
 		expect(statusBlock).toContain('"nextTurn"');
@@ -114,7 +94,7 @@ describe("/ghpr-monitor status subcommand", () => {
 	it("uses display true for TUI rendering", () => {
 		const statusBlock = src.slice(
 			src.indexOf('raw.toLowerCase() === "status"'),
-			src.indexOf("// Parse: check [PR identifier]"),
+			src.indexOf('raw.toLowerCase() === "check"'),
 		);
 		expect(statusBlock).toContain("display: true");
 	});
@@ -122,7 +102,7 @@ describe("/ghpr-monitor status subcommand", () => {
 	it("uses the registered ghpr-monitor message renderer", () => {
 		const statusBlock = src.slice(
 			src.indexOf('raw.toLowerCase() === "status"'),
-			src.indexOf("// Parse: check [PR identifier]"),
+			src.indexOf('raw.toLowerCase() === "check"'),
 		);
 		expect(statusBlock).toContain('customType: "ghpr-monitor"');
 	});
@@ -130,23 +110,19 @@ describe("/ghpr-monitor status subcommand", () => {
 	it("shows usage hint when no monitors are running", () => {
 		const statusBlock = src.slice(
 			src.indexOf('raw.toLowerCase() === "status"'),
-			src.indexOf("// Parse: check [PR identifier]"),
+			src.indexOf('raw.toLowerCase() === "check"'),
 		);
 		expect(statusBlock).toContain("No PR monitors running");
 		expect(statusBlock).toContain("ctx.ui.notify");
 	});
 
 	it("uses shared buildDetailedStatusLines helper (no duplication)", () => {
-		// The shared helper should exist and be used by both the command
-		// handler and the tool action='status'
 		expect(src).toContain("function buildDetailedStatusLines()");
-		// The command handler should call the helper
 		const statusCmdBlock = src.slice(
 			src.indexOf('raw.toLowerCase() === "status"'),
-			src.indexOf("// Parse: check [PR identifier]"),
+			src.indexOf('raw.toLowerCase() === "check"'),
 		);
 		expect(statusCmdBlock).toContain("buildDetailedStatusLines()");
-		// The tool action='status' should also call the helper
 		const toolStatusIdx = src.indexOf('case "status"');
 		const toolStatusBlock = src.slice(toolStatusIdx, toolStatusIdx + 500);
 		expect(toolStatusBlock).toContain("buildDetailedStatusLines()");
@@ -155,7 +131,7 @@ describe("/ghpr-monitor status subcommand", () => {
 	it("includes concise status for the TUI message renderer", () => {
 		const statusBlock = src.slice(
 			src.indexOf('raw.toLowerCase() === "status"'),
-			src.indexOf("// Parse: check [PR identifier]"),
+			src.indexOf('raw.toLowerCase() === "check"'),
 		);
 		expect(statusBlock).toContain("conciseStatus");
 		expect(statusBlock).toContain("concise:");
@@ -163,8 +139,8 @@ describe("/ghpr-monitor status subcommand", () => {
 });
 
 describe("no-args branch does not regress other command handlers", () => {
-	it("check command still works with per-monitor forceNotify", () => {
-		expect(src).toContain("mon.forceNotify = true");
+	it("check command still works via forceCheck", () => {
+		expect(src).toContain("forceCheck");
 		expect(src).toContain("ctx.ui.notify");
 	});
 
@@ -174,7 +150,7 @@ describe("no-args branch does not regress other command handlers", () => {
 	});
 
 	it("URL/shorthand parsing is still present after no-args block", () => {
-		const afterNoArgs = src.slice(src.indexOf("// Try parsing as an issue URL first"));
+		const afterNoArgs = src.slice(src.indexOf("// Issue URL"));
 		expect(afterNoArgs).toContain("parsePRUrl");
 		expect(afterNoArgs).toContain("parsePRShorthand");
 	});

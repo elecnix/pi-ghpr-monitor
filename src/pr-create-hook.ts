@@ -4,9 +4,9 @@
  */
 
 // Re-export the ParsedPR type for test use
-export type { ParsedPR } from "./index";
+export type { ParsedSelector as ParsedPR } from "./keys";
 
-import type { ParsedPR } from "./index";
+import type { ParsedSelector as ParsedPR } from "./keys";
 
 // ---------------------------------------------------------------------------
 // PR URL regex (same as in index.ts)
