@@ -5,7 +5,7 @@
  * (https://github.com/elecnix/gh-monitor). Instead of re-implementing PR/issue/
  * run polling, snapshotting, change-diffing, and notification rendering in
  * TypeScript (the old analyzer.ts / run-monitor.ts / poll-loop trio, ~2000
- * lines), the adapter shells out to `gh monitor monitor <selector>`, which
+ * lines), the adapter shells out to `gh monitor <selector>`, which
  * streams one NDJSON event per genuinely-new change and auto-stops on
  * merge/close/run-completion. The adapter:
  *

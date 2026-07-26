@@ -57,25 +57,25 @@ function restoreEnv() {
 describe("buildMonitorArgs", () => {
 	it("builds PR selector args with -R and interval", () => {
 		expect(buildMonitorArgs(prConfig())).toEqual([
-			"monitor", "-R", "octo/demo", "--interval", "60", "42",
+			"-R", "octo/demo", "--interval", "60", "42",
 		]);
 	});
 
 	it("uses --issue for issue monitors", () => {
 		expect(buildMonitorArgs(prConfig({ resourceType: "issue", number: 7 }))).toEqual([
-			"monitor", "-R", "octo/demo", "--interval", "60", "--issue", "7",
+			"-R", "octo/demo", "--interval", "60", "--issue", "7",
 		]);
 	});
 
 	it("uses --run-id for run monitors (no positional selector)", () => {
 		expect(buildMonitorArgs(prConfig({ resourceType: "run", number: 0, runId: 99 }))).toEqual([
-			"monitor", "-R", "octo/demo", "--interval", "60", "--run-id", "99",
+			"-R", "octo/demo", "--interval", "60", "--run-id", "99",
 		]);
 	});
 
 	it("appends --once for one-shot runs", () => {
 		expect(buildMonitorArgs(prConfig(), { once: true })).toEqual([
-			"monitor", "-R", "octo/demo", "--interval", "60", "42", "--once",
+			"-R", "octo/demo", "--interval", "60", "42", "--once",
 		]);
 	});
 

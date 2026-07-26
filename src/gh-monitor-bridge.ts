@@ -33,8 +33,8 @@ export type { Notification } from "./render";
 /**
  * When set, this binary is invoked directly instead of `gh monitor ...`. Used
  * for tests and sandboxed runs. The binary receives the same subargs that `gh`
- * would forward to the `gh-monitor` extension (i.e. starting with the
- * subcommand, without the leading `monitor` extension name).
+ * would forward to the `gh-monitor` extension (i.e. without the leading
+ * `monitor` extension name).
  */
 export const GH_MONITOR_BIN_ENV = "GH_MONITOR_BIN";
 
@@ -61,15 +61,15 @@ function spawnEnv(config: MonitorConfig): NodeJS.ProcessEnv {
 // ---------------------------------------------------------------------------
 
 /**
- * Build the `gh monitor monitor` subargs for a target.
+ * Build the `gh monitor` root-command subargs for a target.
  *
- * Returns the args after the `monitor` extension name, i.e. the first element
- * is the `monitor` subcommand. PRs use a positional selector; issues use
- * `--issue`; runs use `--run-id`.
+ * `gh monitor`'s default (root) command watches a PR/issue/run; there is no
+ * `monitor` subcommand. PRs use a positional selector; issues use `--issue`;
+ * runs use `--run-id`.
  */
 export function buildMonitorArgs(config: MonitorConfig, opts: { once?: boolean } = {}): string[] {
 	const interval = Math.max(10, config.intervalSec || 60);
-	const args = ["monitor", "-R", `${config.owner}/${config.repo}`, "--interval", String(interval)];
+	const args = ["-R", `${config.owner}/${config.repo}`, "--interval", String(interval)];
 
 	if (config.resourceType === "run") {
 		args.push("--run-id", String(config.runId ?? 0));
@@ -118,7 +118,7 @@ export interface MonitorHandle {
 }
 
 /**
- * Spawn `gh monitor monitor <selector>` and relay each NDJSON line as a
+ * Spawn `gh monitor <selector>` and relay each NDJSON line as a
  * Notification. The process runs until gh-monitor auto-stops (PR merged/closed,
  * run completed) or `abort()` kills it.
  */
@@ -181,7 +181,7 @@ export function spawnMonitor(config: MonitorConfig, handlers: MonitorHandlers): 
 }
 
 /**
- * Run `gh monitor monitor <selector> --once`, collecting every Notification
+ * Run `gh monitor <selector> --once`, collecting every Notification
  * emitted before the process exits. Rejects on a nonzero exit code.
  */
 export async function spawnOnce(config: MonitorConfig): Promise<Notification[]> {

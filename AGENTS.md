@@ -4,7 +4,7 @@ A [Pi](https://github.com/mariozechner/pi-coding-agent) extension that monitors 
 
 ## What It Does
 
-A **thin adapter** around the [`gh monitor`](https://github.com/elecnix/gh-monitor) CLI. The adapter shells out to `gh monitor monitor <selector>`, which streams one NDJSON event per genuinely-new change (new review threads, general comments, failing/green CI, merge conflicts, review decisions, new commits, merge/close) and auto-stops when the PR is merged/closed or a watched workflow run completes. The adapter relays each event into the Pi session and owns the harness integration the CLI can't do itself:
+A **thin adapter** around the [`gh monitor`](https://github.com/elecnix/gh-monitor) CLI. The adapter shells out to `gh monitor <selector>`, which streams one NDJSON event per genuinely-new change (new review threads, general comments, failing/green CI, merge conflicts, review decisions, new commits, merge/close) and auto-stops when the PR is merged/closed or a watched workflow run completes. The adapter relays each event into the Pi session and owns the harness integration the CLI can't do itself:
 
 - the `/ghpr-monitor` command and the `ghpr-monitor` LLM tool,
 - the steering prompt, custom message renderer, and footer status,
