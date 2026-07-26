@@ -105,6 +105,14 @@ export interface MonitorState {
 	lastEventType?: string;
 	lastMessage?: string;
 	lastChecked: Date | null;
+	/**
+	 * Short OID of the last `new-commit` notification delivered to the agent,
+	 * shared between the persistent `gh monitor` process and the stateless
+	 * `gh monitor --once` spawned by `forceCheck`. Used to suppress duplicate
+	 * new-commit notifications when a `/ghpr-monitor check` races with the
+	 * background poll loop. See index.ts `handleNotification` / `forceCheck`.
+	 */
+	lastCommitOid: string | null;
 }
 
 export function emptyMonitorState(): MonitorState {
@@ -114,6 +122,7 @@ export function emptyMonitorState(): MonitorState {
 		failingChecks: [],
 		hasConflict: false,
 		lastChecked: null,
+		lastCommitOid: null,
 	};
 }
 
