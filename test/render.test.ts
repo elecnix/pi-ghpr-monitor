@@ -30,6 +30,11 @@ function n(over: Partial<Notification> = {}): Notification {
 }
 
 describe("updateStateFromNotification", () => {
+	it("emptyMonitorState initializes lastCommitOid to null", () => {
+		const s = emptyMonitorState();
+		expect(s.lastCommitOid).toBeNull();
+	});
+
 	it("carries the current thread/comment counts", () => {
 		const s = emptyMonitorState();
 		updateStateFromNotification(s, n({ unresolved_threads: 3, general_comments: 1 }));

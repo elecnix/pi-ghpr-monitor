@@ -106,6 +106,20 @@ function createActiveMonitor(config: MonitorConfig): ActiveMonitor {
 	};
 }
 
+/**
+ * Extract the (short) commit OID from a `new-commit` Notification, preferring
+ * the explicit `commit_short_oid` field and falling back to the tail of
+ * `commit_url`. Returns null when neither is present.
+ */
+function commitOidOf(n: Notification): string | null {
+	if (n.commit_short_oid) return n.commit_short_oid;
+	if (n.commit_url) {
+		const m = n.commit_url.match(/\/commit\/([0-9a-f]{7,40})$/i);
+		if (m) return m[1]!;
+	}
+	return null;
+}
+
 // ---------------------------------------------------------------------------
 // Main extension
 // ---------------------------------------------------------------------------
@@ -256,6 +270,20 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 
 	function handleNotification(key: string, mon: ActiveMonitor, n: Notification): void {
 		if (mon.exited) return;
+
+		// Suppress duplicate new-commit notifications. The persistent `gh monitor`
+		// process emits each commit once, but a concurrent `gh monitor --once`
+		// (from /ghpr-monitor check, see forceCheck) is stateless and may emit
+		// the same commit. Whichever path delivers first records the OID in
+		// mon.state.lastCommitOid; the other path skips it.
+		if (n.type === "new-commit") {
+			const oid = commitOidOf(n);
+			if (oid) {
+				if (mon.state.lastCommitOid === oid) return;
+				mon.state.lastCommitOid = oid;
+			}
+		}
+
 		updateStateFromNotification(mon.state, n);
 		updateFooter();
 
@@ -404,6 +432,20 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			// If not currently monitored, still surface the one-shot result.
 			const mon = monitors.get(key);
 			for (const n of events) {
+				// `gh monitor --once` is a fresh, stateless process: it emits
+				// `first-poll` and re-emits the current conditions (e.g.
+				// `new-commit`) as if they were new changes. The persistent
+				// monitor already showed `first-poll` at start, and it (not
+				// this one-shot) owns genuine change detection. Skip
+				// `first-poll` and dedup `new-commit` against the persistent
+				// monitor's lastCommitOid so a `/ghpr-monitor check` does not
+				// produce duplicate notifications.
+				if (n.type === "first-poll") continue;
+				if (n.type === "new-commit") {
+					const oid = commitOidOf(n);
+					if (oid && mon && mon.state.lastCommitOid === oid) continue;
+					if (oid && mon) mon.state.lastCommitOid = oid;
+				}
 				if (mon && !mon.exited) updateStateFromNotification(mon.state, n);
 				const concise = n.message;
 				const detailed = n.detail ? `${n.message}\n\n${n.detail}` : n.message;
