@@ -688,6 +688,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		run_id: Type.Optional(Type.Number({ description: "GitHub Actions workflow run id to monitor (watches a single run until it completes). Mutually exclusive with pr_number/url; requires owner+repo." })),
 		mode: Type.Optional(Type.Union([Type.Literal("all"), Type.Literal("comments"), Type.Literal("conflicts"), Type.Literal("actions")])),
 		interval: Type.Optional(Type.Number({ description: "Polling interval in seconds (default: 60, minimum: 10)" })),
+		events: Type.Optional(Type.Array(Type.String(), { description: "Per-event-kind allowlist forwarded to `gh monitor --events`. When set, only the listed event kinds are emitted; all others are suppressed. Omit to receive every kind (the default). Entries are notification template keys, e.g. 'conflict', 'new-failing-checks', 'merged', 'closed', 'run-completed'. Matching is case-insensitive; unknown kinds are rejected by the CLI." })),
 		value: Type.Optional(Type.String({ description: "For preferences action: JSON string with preference overrides. Omit to read current preferences." })),
 	}) as any;
 
@@ -750,13 +751,13 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 						if (!params.owner || !params.repo) {
 							return { content: [{ type: "text", text: "run_id requires owner and repo. Example: ghpr-monitor(action='start', owner='owner', repo='repo', run_id=30433642)" }], details: { action: "start", status: "missing_params", target: "run" } };
 						}
-						const config: MonitorConfig = { owner: params.owner, repo: params.repo, number: 0, host: "github.com", resourceType: "run", mode: params.mode || "all", intervalSec: Math.max(10, params.interval || 60), runId: params.run_id };
+						const config: MonitorConfig = { owner: params.owner, repo: params.repo, number: 0, host: "github.com", resourceType: "run", mode: params.mode || "all", intervalSec: Math.max(10, params.interval || 60), runId: params.run_id, events: params.events };
 						const result = startMonitor(config);
 						return { content: [{ type: "text", text: result.message }], details: { action: "start", status: result.alreadyMonitoring ? "already_running" : "started", config, activeMonitors: monitors.size } };
 					}
 					const resolved = resolvePR();
 					if ("error" in resolved) return { content: [{ type: "text", text: resolved.error }], details: { action: "start", status: "missing_params" } };
-					const config: MonitorConfig = { owner: resolved.owner, repo: resolved.repo, number: resolved.number, host: resolved.host, resourceType: resolved.resourceType, mode: params.mode || "all", intervalSec: Math.max(10, params.interval || 60) };
+					const config: MonitorConfig = { owner: resolved.owner, repo: resolved.repo, number: resolved.number, host: resolved.host, resourceType: resolved.resourceType, mode: params.mode || "all", intervalSec: Math.max(10, params.interval || 60), events: params.events };
 					const result = startMonitor(config);
 					return { content: [{ type: "text", text: result.message }], details: { action: "start", status: result.alreadyMonitoring ? "already_running" : "started", config, activeMonitors: monitors.size } };
 				}

@@ -80,6 +80,12 @@ export function buildMonitorArgs(config: MonitorConfig, opts: { once?: boolean }
 	}
 
 	if (opts.once) args.push("--once");
+	// Per-event-kind allowlist: forward to `gh monitor --events` so the CLI
+	// suppresses unlisted kinds before they reach the adapter. The CLI
+	// validates the kinds and rejects unknown ones.
+	if (config.events && config.events.length > 0) {
+		args.push("--events", config.events.join(","));
+	}
 	return args;
 }
 
