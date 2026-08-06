@@ -172,11 +172,26 @@ The tool accepts these parameters:
 | `pr_number` | number | —       | PR number (required for `start`)               |
 | `mode`      | string | `all`   | Watch mode: `all`, `comments`, `conflicts`, `actions` |
 | `interval`  | number | `60`    | Polling interval in seconds (minimum: 10)      |
+| `events`    | array  | —       | Per-event-kind allowlist. When set, only notifications whose detected kinds intersect this list are delivered; all others are suppressed. Omit to receive every kind (the default). Entries are notification template keys, e.g. `conflict`, `new-failing-checks`, `merged`, `closed`, `run-completed`. Matching is case-insensitive; unknown kinds are rejected. |
 
 ## Requirements
 
 - [Pi](https://github.com/mariozechner/pi-coding-agent) coding agent
 - [gh](https://cli.github.com/) CLI installed and authenticated with access to the target repository
+
+## Reducing notification noise with `events`
+
+By default the monitor delivers a notification for every event kind: every CI transition, every comment, every review, every new commit, plus the merge-blocking ones. An orchestrator or automation caller that only wants to act on a subset can pass an `events` allowlist at `start`; the adapter forwards it to `gh monitor --events`, which suppresses unlisted kinds before they reach the agent session.
+
+```ts
+// Only act on merge conflicts, newly-failing checks, and the terminal merge/close:
+ghpr-monitor(action='start', url='owner/repo#42', events=['conflict','new-failing-checks','merged','closed'])
+
+// Watch a workflow run but only notify on completion (skip queued/in-progress):
+ghpr-monitor(action='start', owner='owner', repo='repo', run_id=30433642, events=['run-completed'])
+```
+
+The recognised event kinds are the notification template keys: `new-unresolved-threads`, `new-general-comments`, `conflict`, `new-failing-checks`, `ci-all-green`, `review-approved`, `review-changes-requested`, `review-dismissed`, `new-commit`, `merged`, `closed`, `first-poll`, `all-clear`, `issue-closed`, `issue-reopened`, `issue-new-comment`, `issue-mention`, `run-queued`, `run-in-progress`, `run-completed`, `repo-new-pr`, `repo-new-issue`. Matching is case-insensitive. Omit `events` to receive everything; an empty array is treated the same as omitting it (the CLI rejects an empty `--events` value, so the adapter does not forward one). Unknown kinds are rejected by `gh monitor` with a clear error.
 
 ## Development
 

@@ -15,8 +15,8 @@ export type ResourceType = "pr" | "issue" | "run";
  * A monitor's resolved target and polling options.
  *
  * `mode` is accepted for backwards compatibility with the old tool schema but
- * is not forwarded to `gh monitor` (which always surfaces every event kind);
- * `gh monitor --ignored-bots` and the preferences file control filtering.
+ * is not forwarded to `gh monitor`; `gh monitor --events` (via `events`)
+ * and the preferences file control filtering.
  */
 export interface MonitorConfig {
 	owner: string;
@@ -31,6 +31,13 @@ export interface MonitorConfig {
 	runId?: number;
 	/** When true, the adapter nudges the agent to merge once CI is green. */
 	autoMerge?: boolean;
+	/** Per-event-kind allowlist forwarded to `gh monitor --events`. When set,
+	 *  only the listed event kinds are emitted; all others are suppressed.
+	 *  Omit (undefined) to receive every kind — today's default behaviour.
+	 *  Entries are notification template keys (e.g. "conflict",
+	 *  "new-failing-checks", "merged", "run-completed"). Matching is
+	 *  case-insensitive; unknown kinds are rejected by `gh monitor`. */
+	events?: string[];
 }
 
 export interface ParsedSelector {
