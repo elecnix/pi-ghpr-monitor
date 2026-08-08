@@ -77,6 +77,7 @@ import {
 } from "./adapter-prefs";
 import { setSessionId, enableDebug, disableDebug, isDebugEnabled, closeLogger, log, getLogPath } from "./logger";
 import { isPRCreateCommand, parsePRUrlsFromOutput, createPRCreateNudge } from "./pr-create-hook";
+import { isIssueCreateCommand, parseIssueUrlsFromOutput, createIssueCreateNudge } from "./issue-create-hook";
 
 // ---------------------------------------------------------------------------
 // Active monitor entry
@@ -127,9 +128,11 @@ function commitOidOf(n: Notification): string | null {
 export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	const monitors: Map<string, ActiveMonitor> = new Map();
 	const nudgedPRKeys: Set<string> = new Set();
+	const nudgedIssueKeys: Set<string> = new Set();
 	let agentTurnActive = false;
 	let queuedUpdates: Array<{ concise: string; detailed: string; host: string; monitorKey: string }> = [];
 	let queuedPrCreateNudges: Array<{ message: string; host: string }> = [];
+	let queuedIssueCreateNudges: Array<{ message: string; host: string }> = [];
 	let uiCtx: ExtensionUIContext | undefined;
 
 	// For testing: allow pointing the bridge at a mock binary / reducing interval.
@@ -207,6 +210,12 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			}
 			queuedPrCreateNudges = [];
 		}
+		if (queuedIssueCreateNudges.length > 0) {
+			for (const nudge of queuedIssueCreateNudges) {
+				sendPRNotification(nudge.message, nudge.message, { deliverAs: "steer", host: nudge.host });
+			}
+			queuedIssueCreateNudges = [];
+		}
 		// Wake footers
 		updateFooter();
 	});
@@ -241,6 +250,33 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			const message = createPRCreateNudge(pr, nudgeTemplate);
 			log(`PR create hook: queueing nudge for ${key}`);
 			queuedPrCreateNudges.push({ message, host: pr.host });
+		}
+	});
+
+	// Issue create hook: detect `gh issue create` and nudge the LLM to monitor.
+	pi.on("tool_result", async (event) => {
+		if (event.toolName !== "bash") return;
+		const input = event.input as { command?: string } | undefined;
+		const command = input?.command;
+		if (!command || !isIssueCreateCommand(command)) return;
+		if (event.isError) {
+			log(`Issue create hook: gh issue create failed, skipping nudge`);
+			return;
+		}
+		const content = Array.isArray(event.content)
+			? event.content.map((c) => ("text" in c ? c.text : "")).join("\n")
+			: String(event.content ?? "");
+		const issues = parseIssueUrlsFromOutput(content);
+		if (issues.length === 0) return;
+
+		const nudgeTemplate = getAdapterPref("issueCreateNudge", currentAdapterPrefs) as string | undefined;
+		for (const issue of issues) {
+			const key = prKey(issue.owner, issue.repo, issue.number, issue.host);
+			if (monitors.has(key) || nudgedIssueKeys.has(key)) continue;
+			nudgedIssueKeys.add(key);
+			const message = createIssueCreateNudge(issue, nudgeTemplate);
+			log(`Issue create hook: queueing nudge for ${key}`);
+			queuedIssueCreateNudges.push({ message, host: issue.host });
 		}
 	});
 
@@ -707,7 +743,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			"Use action='check' to trigger an immediate poll.",
 			"Use action='merge' to toggle auto-merge when CI passes (if not disabled by the disableMergeTool preference). When enabled, the monitor will notify you to merge the PR once CI turns green.",
 			"Use action='preferences' to view current preferences or update them with a value parameter.",
-			"The value parameter for preferences is a JSON string. gh-monitor-owned keys: templates (map of event-kind → template string|null), ignoredBots (array of strings), retriggerComments (boolean). Pi-specific keys: disableMergeTool (boolean), prCreateNudge (string), ciGreenMerge (string). Set any key to null to reset it to default.",
+			"The value parameter for preferences is a JSON string. gh-monitor-owned keys: templates (map of event-kind → template string|null), ignoredBots (array of strings), retriggerComments (boolean). Pi-specific keys: disableMergeTool (boolean), prCreateNudge (string), issueCreateNudge (string), ciGreenMerge (string). Set any key to null to reset it to default.",
 			"Event kinds for templates: new-unresolved-threads, new-general-comments, conflict, new-failing-checks, ci-all-green, review-approved, review-changes-requested, review-dismissed, new-commit, merged, closed, first-poll, all-clear, issue-closed, issue-reopened, issue-new-comment, issue-mention, run-queued, run-in-progress, run-completed.",
 			"Template variables: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, {unresolvedThreads}, {generalComments}, {failingChecks}, {conflict}, {commitOid}, {commitShortOid}, {commitUrl}, {commitAuthor}, {commitCoauthors}, {commitMessageHeadline}, {runId}, {runName}, {runNumber}, {runEvent}, {runStatus}, {runConclusion}, {runBranch}, {runUrl}.",
 			"Do NOT stop monitoring on your own. Only the user can stop monitoring via /ghpr-monitor off.",
@@ -824,7 +860,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 
 	async function handlePreferencesAction(value: string | undefined) {
 		const ghKeys = ["templates", "ignoredBots", "retriggerComments"];
-		const piKeys = ["disableMergeTool", "prCreateNudge", "ciGreenMerge"];
+		const piKeys = ["disableMergeTool", "prCreateNudge", "issueCreateNudge", "ciGreenMerge"];
 
 		if (value !== undefined && value !== "") {
 			let parsed: Record<string, unknown>;
@@ -897,10 +933,11 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		lines.push("Pi-specific (adapter):");
 		lines.push(`  disableMergeTool: ${JSON.stringify(getAdapterPref("disableMergeTool", currentAdapterPrefs))} (default: ${DEFAULT_DISABLE_MERGE_TOOL})`);
 		lines.push(`  prCreateNudge: ${JSON.stringify(getAdapterPref("prCreateNudge", currentAdapterPrefs))}`);
+		lines.push(`  issueCreateNudge: ${JSON.stringify(getAdapterPref("issueCreateNudge", currentAdapterPrefs))}`);
 		lines.push(`  ciGreenMerge: ${JSON.stringify(getAdapterPref("ciGreenMerge", currentAdapterPrefs))}`);
 		lines.push("");
 		lines.push(`Set with: ghpr-monitor(action='preferences', value='{"templates":{"conflict":"..."}, "disableMergeTool":true}')`);
-		lines.push(`Keys: templates, ignoredBots, retriggerComments (gh-monitor); disableMergeTool, prCreateNudge, ciGreenMerge (pi). Set a key to null to reset.`);
+		lines.push(`Keys: templates, ignoredBots, retriggerComments (gh-monitor); disableMergeTool, prCreateNudge, issueCreateNudge, ciGreenMerge (pi). Set a key to null to reset.`);
 		return lines.join("\n");
 	}
 }

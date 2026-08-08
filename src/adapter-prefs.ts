@@ -8,6 +8,8 @@
  *   - disableMergeTool: hide the `merge` tool action from the LLM (user-only).
  *   - prCreateNudge:    template for the steer message injected after
  *                       `gh pr create` (see pr-create-hook.ts).
+ *   - issueCreateNudge: template for the steer message injected after
+ *                       `gh issue create` (see issue-create-hook.ts).
  *   - ciGreenMerge:     template for the "CI is green, merge now" nudge the
  *                       adapter emits when auto-merge is enabled and CI goes
  *                       green.
@@ -22,10 +24,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { DEFAULT_PR_CREATE_NUDGE } from "./pr-create-hook";
+import { DEFAULT_ISSUE_CREATE_NUDGE } from "./issue-create-hook";
 
 export interface AdapterPrefs {
 	disableMergeTool?: boolean;
 	prCreateNudge?: string;
+	issueCreateNudge?: string;
 	ciGreenMerge?: string;
 }
 
@@ -58,6 +62,7 @@ export function getAdapterPref<K extends keyof AdapterPrefs>(
 	switch (key) {
 		case "disableMergeTool": return DEFAULT_DISABLE_MERGE_TOOL;
 		case "prCreateNudge": return DEFAULT_PR_CREATE_NUDGE;
+		case "issueCreateNudge": return DEFAULT_ISSUE_CREATE_NUDGE;
 		case "ciGreenMerge": return DEFAULT_CI_GREEN_MERGE;
 		default: return undefined;
 	}
@@ -65,7 +70,7 @@ export function getAdapterPref<K extends keyof AdapterPrefs>(
 
 /**
  * Load pi-specific prefs, merging the file over defaults. Best-effort migrates
- * the three keys from the legacy preferences.json if adapter.json is absent.
+ * the keys from the legacy preferences.json if adapter.json is absent.
  */
 export function loadAdapterPrefs(): AdapterPrefs {
 	const file = adapterPrefsPath();
@@ -84,6 +89,7 @@ export function loadAdapterPrefs(): AdapterPrefs {
 			const legacy = JSON.parse(fs.readFileSync(LEGACY_PREFS_FILE, "utf-8")) as Partial<AdapterPrefs>;
 			prefs.disableMergeTool = legacy.disableMergeTool;
 			prefs.prCreateNudge = legacy.prCreateNudge;
+			prefs.issueCreateNudge = legacy.issueCreateNudge;
 			prefs.ciGreenMerge = legacy.ciGreenMerge;
 		} catch {
 			prefs = {};
