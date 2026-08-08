@@ -2,13 +2,15 @@
 
 A [Pi](https://github.com/mariozechner/pi-coding-agent) extension that monitors GitHub Pull Requests and injects status updates into your agent session.
 
+This extension is a thin adapter that wraps the [`gh monitor`](https://github.com/elecnix/gh-monitor) CLI. The CLI handles polling, snapshotting, change-diffing, and notification templating; the adapter owns harness integration — the `/ghpr-monitor` command, the `ghpr-monitor` LLM tool, turn-batching, footer status, and agent-specific nudges.
+
 ## What It Does
 
 When you're working on a PR, you want your AI agent to stay informed about changes — new review comments, merge conflicts, CI failures — so it can take action automatically. This extension makes that possible by:
 
 1. **Registering a `/ghpr-monitor` command** for direct user control
 2. **Registering a `ghpr-monitor` tool** the LLM can invoke itself (start/status only — only you can stop it)
-3. **Polling the PR via the GitHub GraphQL API** (using `gh` CLI authentication)
+3. **Shelling out to `gh monitor`** which handles polling via the GitHub API
 4. **Injecting notifications** into the session as PR conditions change
 
 ## Key Features
@@ -147,7 +149,7 @@ PR/issue monitoring is unchanged; `run_id` is mutually exclusive with `pr_number
 
 ## How It Works
 
-The extension uses `gh api graphql` to poll the PR at a configurable interval (default: 60 seconds). It checks for:
+The extension shells out to [`gh monitor`](https://github.com/elecnix/gh-monitor), which polls the PR at a configurable interval (default: 60 seconds) and emits one NDJSON event per genuinely-new change. The adapter relays these events into the Pi session. The CLI checks for:
 
 - **Unresolved review threads** — new comments that need attention
 - **Merge conflicts** — the PR can't be merged
