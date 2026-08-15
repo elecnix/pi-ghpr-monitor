@@ -57,7 +57,7 @@ jobs:
 
       - name: Upload screenshots as artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: tmux-screenshots
           path: test/integration/screenshots/
@@ -65,7 +65,7 @@ jobs:
 
       - name: Create tmux screenshots check report
         if: always()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require('fs');
