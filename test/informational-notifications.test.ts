@@ -90,3 +90,55 @@ describe("monitor notifications are informational (no turn trigger)", () => {
 		expect(statusBlock).not.toContain("pi.sendUserMessage");
 	});
 });
+
+describe("degraded events are informational and deduped per episode", () => {
+	function handleNotificationBlock(): string {
+		const start = src.indexOf("function handleNotification");
+		const end = src.indexOf("function deliver(", start);
+		expect(start).toBeGreaterThan(-1);
+		return src.slice(start, end);
+	}
+
+	it("handleNotification has a degraded-episode dedup branch", () => {
+		const block = handleNotificationBlock();
+		expect(block).toContain('n.type === "degraded"');
+		expect(block).toContain("mon.lastDegradedSurface");
+		expect(block).toContain("return;");
+	});
+
+	it("any non-degraded event ends a degraded episode", () => {
+		const block = handleNotificationBlock();
+		expect(block).toContain("mon.lastDegradedSurface = null;");
+	});
+
+	it("degraded events reach the same informational deliver() path", () => {
+		const block = handleNotificationBlock();
+		// No user-message steering anywhere in the notification handler.
+		expect(block).not.toContain("pi.sendUserMessage");
+		expect(block).not.toContain('deliverAs: "steer"');
+		expect(block).toContain("deliver(concise, detailed, host, key);");
+	});
+
+	it("ActiveMonitor tracks the degraded surface (reset on creation)", () => {
+		const monBlock = src.slice(
+			src.indexOf("export interface ActiveMonitor"),
+			src.indexOf("function createActiveMonitor"),
+		);
+		expect(monBlock).toContain("lastDegradedSurface");
+		const createBlock = src.slice(
+			src.indexOf("function createActiveMonitor"),
+			src.indexOf("function commitOidOf"),
+		);
+		expect(createBlock).toContain("lastDegradedSurface: null");
+	});
+
+	it("Notification type carries degraded_surface", () => {
+		const renderSrc = fs.readFileSync(path.join(__dirname, "..", "src", "render.ts"), "utf-8");
+		const notifBlock = renderSrc.slice(
+			renderSrc.indexOf("export interface Notification"),
+			renderSrc.indexOf("formatFooterStatus"),
+		);
+		expect(notifBlock).toContain("degraded_surface?:");
+		expect(notifBlock).toContain("degraded_message?:");
+	});
+});

@@ -188,6 +188,9 @@ export interface Notification {
 	run_id?: number;
 	conclusion?: string;
 	timestamp?: string;
+	/** API surface that could not be read ("rest", "graphql", "both") — degraded events. */
+	degraded_surface?: string;
+	degraded_message?: string;
 }
 
 /**

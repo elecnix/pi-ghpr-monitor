@@ -93,6 +93,12 @@ export interface ActiveMonitor {
 	autoMergeNotified: boolean;
 	/** Set when the monitor exited (so late events are ignored). */
 	exited: boolean;
+	/**
+	 * API surface of the current `degraded` episode ("graphql", "rest", …),
+	 * or null when the last poll succeeded. Used to surface a degraded event
+	 * only once per episode — the CLI re-emits it on every failed poll.
+	 */
+	lastDegradedSurface: string | null;
 }
 
 function createActiveMonitor(config: MonitorConfig): ActiveMonitor {
@@ -104,6 +110,7 @@ function createActiveMonitor(config: MonitorConfig): ActiveMonitor {
 		lastNudgeTime: 0,
 		autoMergeNotified: false,
 		exited: false,
+		lastDegradedSurface: null,
 	};
 }
 
@@ -327,6 +334,21 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				if (mon.state.lastCommitOid === oid) return;
 				mon.state.lastCommitOid = oid;
 			}
+		}
+
+		// Degraded events are infrastructure diagnostics: the CLI re-emits
+		// `degraded` on EVERY failed poll while an API surface stays down
+		// (throttled only by its own backoff), so a rate-limit outage would
+		// otherwise spam the agent's context. Surface the first event of an
+		// episode; any non-degraded event (a successful poll) ends the episode
+		// so a later re-degradation is surfaced again. Delivered through the
+		// same informational path as other notifications (no turn trigger).
+		if (n.type === "degraded") {
+			const surface = n.degraded_surface ?? "api";
+			if (mon.lastDegradedSurface === surface) return;
+			mon.lastDegradedSurface = surface;
+		} else {
+			mon.lastDegradedSurface = null;
 		}
 
 		updateStateFromNotification(mon.state, n);
