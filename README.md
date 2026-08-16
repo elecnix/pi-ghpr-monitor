@@ -17,7 +17,8 @@ When you're working on a PR, you want your AI agent to stay informed about chang
 
 ### Smart Notification Delivery
 
-- **Throttled during active turns** — updates are queued while the agent is working, then flushed when it goes idle. No spam.
+- **Informational, never turn-triggering** — status notifications are delivered as custom messages: shown in the TUI and appended to the agent's conversation history, so the agent sees them on its next turn without being woken up. Only the deliberate PR/issue create-hook nudges and explicit user commands (`/ghpr-monitor !`, steer messages) start a turn.
+- **Throttled during active turns** — updates are queued while the agent is working, then flushed at turn end. No mid-turn steering, no spam.
 - **Reminders after idle** — if actionable items remain when the agent finishes a turn, a nudge is sent on the next poll cycle so nothing falls through the cracks.
 - **Change detection** — only sends updates when something actually changed (new comments, CI status changes, etc.).
 - **Session notifications for errors** — poll errors appear in the TUI, not as LLM messages.

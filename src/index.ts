@@ -147,7 +147,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 
 	// Custom message renderer for "ghpr-monitor" messages — shows only the
 	// concise summary in the TUI; the agent receives the full content via the
-	// UserMessage delivered by sendPRNotification().
+	// custom message appended to the LLM history by sendPRNotification().
 	pi.registerMessageRenderer<{ concise: string }>("ghpr-monitor", (message, _options, theme) => {
 		const concise = message.details?.concise ?? (typeof message.content === "string" ? message.content : "");
 		const box = new Box(1, 0, (t: string) => theme.bg("customMessageBg", t));
@@ -168,13 +168,21 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	});
 
 	/**
-	 * Deliver a notification to both the agent (UserMessage) and the TUI
-	 * (CustomMessage). The detailed body is rendered as markdown for the
-	 * UserMessage component; the concise summary uses raw OSC-8 for the Text
-	 * component. See render.ts/linkifyPRRefs for the format split.
+	 * Deliver a monitor notification to both the TUI (CustomMessage, concise
+	 * summary via the ghpr-monitor renderer) and the agent's LLM context
+	 * (full detailed body).
+	 *
+	 * Notifications are INFORMATIONAL and must never trigger a turn on their
+	 * own: pi.sendUserMessage() always starts a new agent turn, so it is only
+	 * used here when an explicit deliverAs is passed (the deliberate PR/issue
+	 * create-hook nudges). Without it, delivery is a plain custom message:
+	 * when the agent is idle it is appended to the conversation history — the
+	 * agent sees it on its next turn without being woken. While the agent is
+	 * mid-turn the caller queues and flushes at turn_end instead (see
+	 * deliver()). See render.ts/linkifyPRRefs for the format split.
 	 */
 	function sendPRNotification(concise: string, detailed: string, options?: { deliverAs?: "steer" | "followUp" | "nextTurn"; host?: string; displayOnly?: boolean }) {
-		const delivery = options?.deliverAs ?? "steer";
+		const delivery = options?.deliverAs;
 		const linkifyHost = options?.host ?? "github.com";
 		const markdownDetailed = linkifyPRRefs(detailed, linkifyHost, "markdown");
 		const linkifiedConcise = linkifyPRRefs(concise, linkifyHost, "osc8");
@@ -200,7 +208,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		agentTurnActive = false;
 		if (queuedUpdates.length > 0) {
 			for (const u of queuedUpdates) {
-				sendPRNotification(u.concise, u.detailed, { deliverAs: "steer", host: u.host });
+				// Informational: visible to the agent next turn, no new turn.
+				sendPRNotification(u.concise, u.detailed, { host: u.host });
 			}
 			queuedUpdates = [];
 		}
@@ -370,7 +379,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			queuedUpdates.push({ concise, detailed, host, monitorKey });
 			return;
 		}
-		sendPRNotification(concise, detailed, { deliverAs: "steer", host });
+		// Informational: visible to the agent next turn, no new turn.
+		sendPRNotification(concise, detailed, { host });
 	}
 
 	function handleExit(key: string, mon: ActiveMonitor, code: number | null, stderr: string): void {
@@ -488,7 +498,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				if (agentTurnActive) {
 					queuedUpdates.push({ concise, detailed, host: config.host, monitorKey: key });
 				} else {
-					sendPRNotification(concise, detailed, { deliverAs: "steer", host: config.host });
+					// Informational: visible to the agent next turn, no new turn.
+					sendPRNotification(concise, detailed, { host: config.host });
 				}
 			}
 			if (mon) mon.lastNudgeTime = Date.now();
