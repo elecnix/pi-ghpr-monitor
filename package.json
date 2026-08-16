@@ -1,6 +1,6 @@
 {
   "name": "pi-ghpr-monitor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Pi extension that monitors GitHub PRs and injects status updates into the agent session",
   "keywords": [
     "pi-package"
