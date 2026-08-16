@@ -9,7 +9,7 @@ This extension is a thin adapter that wraps the [`gh monitor`](https://github.co
 When you're working on a PR, you want your AI agent to stay informed about changes — new review comments, merge conflicts, CI failures — so it can take action automatically. This extension makes that possible by:
 
 1. **Registering a `/ghpr-monitor` command** for direct user control
-2. **Registering a `ghpr-monitor` tool** the LLM can invoke itself (start/status only — only you can stop it)
+2. **Registering a `ghpr-monitor` tool** the LLM can invoke itself (start/status/check/merge/preferences — plus `stop`, an explicit last resort for obsolete or redundant monitors)
 3. **Shelling out to `gh monitor`** which handles polling via the GitHub API
 4. **Injecting notifications** into the session as PR conditions change
 
@@ -73,9 +73,9 @@ Comments with a 👍 (thumbs up) reaction are automatically filtered out of noti
 
 When the PR is merged or closed, the extension sends a final notification and stops monitoring automatically.
 
-### Always-On Monitoring
+### Monitoring Lifecycle
 
-The LLM tool only has `start` and `status` actions. Only the user can stop monitoring with `/ghpr-monitor off`. This ensures the agent keeps watching for review comments even when CI is green.
+The LLM tool exposes `start`, `status`, `check`, `merge`, `preferences` — and `stop`. Stopping is an **explicit, last-resort operation**: the agent should only use `action='stop'` when a monitor is known to be obsolete or redundant (e.g. the same PR is already monitored elsewhere, or the task that needed it is done). Monitors otherwise run until the PR is merged/closed (or a watched run completes), or until the user stops them with `/ghpr-monitor off`. This keeps the agent watching for review comments even when CI is green.
 
 ## Installation
 
@@ -109,16 +109,18 @@ Any text after the URL or `owner/repo number` is sent to the agent as a steer me
 
 ### Tool: `ghpr-monitor`
 
-The agent can start monitoring or check status:
+The agent can start monitoring, check status, and stop monitoring:
 
 ```
 ghpr-monitor(action="start", url="https://github.com/elecnix/gh-pr-review/pull/42")
 ghpr-monitor(action="start", owner="elecnix", repo="gh-pr-review", pr_number=42)
 ghpr-monitor(action="start", owner="elecnix", repo="gh-pr-review", run_id=30433642)   # watch a single workflow run
 ghpr-monitor(action="status")
+ghpr-monitor(action="stop")                                        # stop all monitors
+ghpr-monitor(action="stop", url="owner/repo#42")                   # stop a specific monitor
 ```
 
-The agent **cannot** stop monitoring — only `/ghpr-monitor off` can do that. This ensures monitoring continues until the PR is merged, the run completes, or you explicitly stop it.
+The agent can stop monitoring with `action='stop'` — an explicit, last-resort operation for when a monitor is known to be obsolete or redundant. Otherwise monitoring continues until the PR is merged, the run completes, or the user stops it with `/ghpr-monitor off`.
 
 ### Watching a standalone workflow run
 
@@ -145,7 +147,7 @@ PR/issue monitoring is unchanged; `run_id` is mutually exclusive with `pr_number
    - **✅ All checks pass** — the agent confirms it's ready to merge
 4. When the PR is merged or closed, monitoring stops automatically (e.g. `🔀 PR https://github.com/owner/repo/pull/42 was merged. Monitoring stopped.`)
 5. The agent adds 👍 reactions to dismiss bot comments it doesn't need to act on
-6. You stop monitoring explicitly: `/ghpr-monitor off`
+6. You stop monitoring explicitly: `/ghpr-monitor off` — or the agent stops a monitor known to be obsolete or redundant via `action='stop'` (last resort)
 
 ## How It Works
 
@@ -167,7 +169,7 @@ The tool accepts these parameters:
 
 | Parameter   | Type   | Default | Description                                    |
 |-------------|--------|---------|------------------------------------------------|
-| `action`    | string | —       | `start` or `status` (not `stop` — only user can stop) |
+| `action`    | string | —       | `start`, `status`, `check`, `merge`, `preferences`, or `stop` (`stop` is a last resort for obsolete/redundant monitors) |
 | `url`       | string | —       | GitHub PR URL (alternative to owner+repo+pr_number) |
 | `owner`     | string | —       | Repository owner (required for `start`)        |
 | `repo`      | string | —       | Repository name (required for `start`)         |
