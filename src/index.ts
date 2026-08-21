@@ -78,6 +78,7 @@ import {
 import { setSessionId, enableDebug, disableDebug, isDebugEnabled, closeLogger, log, getLogPath } from "./logger";
 import { isPRCreateCommand, parsePRUrlsFromOutput, createPRCreateNudge } from "./pr-create-hook";
 import { isIssueCreateCommand, parseIssueUrlsFromOutput, createIssueCreateNudge } from "./issue-create-hook";
+import { type FailureLogInfo, headCommitOid, fetchFailureLogsForCommit, formatFailureLogBlock } from "./failure-logs";
 
 // ---------------------------------------------------------------------------
 // Active monitor entry
@@ -99,6 +100,12 @@ export interface ActiveMonitor {
 	 * only once per episode — the CLI re-emits it on every failed poll.
 	 */
 	lastDegradedSurface: string | null;
+	/** Head-commit OID the failureLogs cache was fetched for (#93). */
+	failureLogsOid: string | null;
+	/** Cached failure-log snippets for failureLogsOid (#93). */
+	failureLogs: FailureLogInfo[];
+	/** True while a failure-log fetch is in flight (dedupes concurrent events). */
+	failureLogsFetching: boolean;
 }
 
 function createActiveMonitor(config: MonitorConfig): ActiveMonitor {
@@ -111,6 +118,9 @@ function createActiveMonitor(config: MonitorConfig): ActiveMonitor {
 		autoMergeNotified: false,
 		exited: false,
 		lastDegradedSurface: null,
+		failureLogsOid: null,
+		failureLogs: [],
+		failureLogsFetching: false,
 	};
 }
 
@@ -413,7 +423,53 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			mon.autoMergeNotified = false;
 		}
 
+		// CI failure log enrichment (#93): before delivering a failing-checks
+		// event, fetch failed-job names and truncated log snippets so the agent
+		// can diagnose without an extra `gh run view` turn. Best-effort — on any
+		// failure the event is delivered without snippets.
+		if (n.type === "new-failing-checks") {
+			void deliverFailingChecksWithLogs(key, mon, n);
+			return;
+		}
+
 		deliver(concise, detailed, host, key, wake);
+		mon.lastSentUpdate = concise;
+		mon.lastNudgeTime = Date.now();
+	}
+
+	/**
+	 * Deliver a `new-failing-checks` event, enriched with failure-log snippets
+	 * when they can be fetched (#93). Cached per head-commit OID so repeated
+	 * events for the same commit don't re-fetch; fully defensive.
+	 */
+	async function deliverFailingChecksWithLogs(key: string, mon: ActiveMonitor, n: Notification): Promise<void> {
+		const config = mon.config;
+		const concise = n.message;
+		const baseDetailed = n.detail ? `${n.message}\n\n${n.detail}` : n.message;
+		let detailed = baseDetailed;
+
+		try {
+			const oid = await headCommitOid(config);
+			if (oid && !mon.failureLogsFetching) {
+				if (mon.failureLogsOid !== oid) {
+					mon.failureLogsOid = oid;
+					mon.failureLogsFetching = true;
+					try {
+						mon.failureLogs = await fetchFailureLogsForCommit(`${config.owner}/${config.repo}`, oid);
+					} finally {
+						mon.failureLogsFetching = false;
+					}
+				}
+				if (mon.failureLogs.length > 0) {
+					detailed = `${baseDetailed}\n${formatFailureLogBlock(mon.failureLogs)}`;
+				}
+			}
+		} catch (err) {
+			// Degrade gracefully: notification still goes out without snippets.
+			log(`Failure-log extraction error for ${key}: ${err instanceof Error ? err.message : String(err)}`);
+		}
+
+		deliver(concise, detailed, config.host, key, shouldWake(mon, n.type));
 		mon.lastSentUpdate = concise;
 		mon.lastNudgeTime = Date.now();
 	}
