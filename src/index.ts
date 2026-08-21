@@ -26,6 +26,7 @@ import {
 	type PullRequestData,
 	type PRStatus,
 	type MonitorConfig,
+	type FailureLogInfo,
 	snapshotPR,
 	formatActionableItems,
 
@@ -33,6 +34,8 @@ import {
 	formatAgentNotification,
 	formatAgentStatusUpdate,
 	linkifyPRRefs,
+	extractLogSnippet,
+	parseFailedRuns,
 } from "./analyzer";
 import {
 	type Preferences,
@@ -197,6 +200,47 @@ async function fetchPRData(config: MonitorConfig, signal?: AbortSignal, mockBase
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
+// CI failure log extraction (#93)
+// ---------------------------------------------------------------------------
+
+/** Max number of failed runs to fetch logs for in a single poll. */
+const MAX_FAILURE_LOG_RUNS = 3;
+
+/**
+ * Fetch failure-log snippets for a commit's failed workflow runs.
+ *
+ * Uses `gh run list --commit <oid>` to find failed runs, then
+ * `gh run view <run-id> --log-failed` for each. Best-effort: any failure
+ * (gh missing, rate limit, no logs) results in fewer or zero entries —
+ * never an exception.
+ */
+async function fetchFailureLogs(config: MonitorConfig, oid: string): Promise<FailureLogInfo[]> {
+	const repo = `${config.owner}/${config.repo}`;
+	const listResult = await runGh([
+		"run", "list",
+		"--repo", repo,
+		"--commit", oid,
+		"--json", "databaseId,name,conclusion",
+		"--limit", "20",
+	]);
+	if (listResult.exitCode !== 0) {
+		log(`Failure-log extraction: gh run list failed for ${repo}@${oid.slice(0, 7)}: ${listResult.stderr.trim()}`);
+		return [];
+	}
+	const failedRuns = parseFailedRuns(listResult.stdout).slice(0, MAX_FAILURE_LOG_RUNS);
+	const logs: FailureLogInfo[] = [];
+	for (const run of failedRuns) {
+		const view = await runGh(["run", "view", String(run.runId), "--repo", repo, "--log-failed"]);
+		if (view.exitCode !== 0 || !view.stdout.trim()) {
+			log(`Failure-log extraction: no log for run ${run.runId} (${run.name}) on ${repo}`);
+			continue;
+		}
+		logs.push({ jobName: run.name, runId: run.runId, snippet: extractLogSnippet(view.stdout) });
+	}
+	return logs;
+}
+
+// ---------------------------------------------------------------------------
 // PR URL parser
 // ---------------------------------------------------------------------------
 
@@ -263,6 +307,10 @@ export interface ActiveMonitor {
 	lastNudgeTime: number; // epoch ms
 	pollWakeResolve: (() => void) | null;
 	knownCommitOid: string | null;
+	/** Cached failure-log snippets for the commit in failureLogsCommitOid (#93). */
+	failureLogCache: FailureLogInfo[];
+	/** Commit OID the failureLogCache was fetched for. */
+	failureLogsCommitOid: string | null;
 }
 
 function createActiveMonitor(config: MonitorConfig): ActiveMonitor {
@@ -280,6 +328,8 @@ function createActiveMonitor(config: MonitorConfig): ActiveMonitor {
 		lastNudgeTime: 0,
 		pollWakeResolve: null,
 		knownCommitOid: null,
+		failureLogCache: [],
+		failureLogsCommitOid: null,
 	};
 }
 
@@ -676,7 +726,33 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				}
 
 				const curr = snapshotPR(pr, currentPreferences.ignoredBots);
+
+				// CI failure log extraction (#93): when failing checks newly appear,
+				// fetch failed-job names and truncated log snippets so the agent can
+				// diagnose without an extra `gh run view` turn. Cached per commit and
+				// fully defensive — extraction failures just omit the snippet.
+				const prevFailingChecks = mon.lastStatus?.failingChecks ?? [];
+				const hasNewFailures = curr.failingChecks.some(c => !prevFailingChecks.includes(c));
+				if (hasNewFailures && curr.lastCommitOid) {
+					try {
+						const logs = mon.failureLogsCommitOid === curr.lastCommitOid
+							? mon.failureLogCache
+							: await fetchFailureLogs(config, curr.lastCommitOid);
+						mon.failureLogCache = logs;
+						mon.failureLogsCommitOid = curr.lastCommitOid;
+						if (logs.length > 0) {
+							curr.failureLogs = logs;
+						}
+					} catch (err) {
+						// Degrade gracefully: notification still goes out without snippets.
+						log(`Failure-log extraction error for ${config.owner}/${config.repo}#${config.number}: ${err instanceof Error ? err.message : String(err)}`);
+					}
+				}
+
 				const { concise: update, detailed: detUpdate } = formatAgentStatusUpdate(mon.lastStatus, curr, config, currentPreferences);
+				// Clear the one-shot logs before storing status so reminders and repeat
+				// polls don't re-send stale snippets.
+				curr.failureLogs = undefined;
 				const hadChange = update.length > 0;
 				let updateSentThisCycle = false;
 

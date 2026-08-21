@@ -129,6 +129,15 @@ export interface CheckSummary {
 	conclusion: string | null;
 }
 
+/** A truncated failure-log snippet for one failed CI job/run (#93). */
+export interface FailureLogInfo {
+	jobName: string;
+	/** GitHub Actions run ID (from `gh run list --json databaseId`). */
+	runId?: number;
+	/** First N lines of the failure log (`gh run view <id> --log-failed`). */
+	snippet: string;
+}
+
 export interface PRStatus {
 	unresolvedThreads: number;
 	generalComments: number;
@@ -147,6 +156,8 @@ export interface PRStatus {
 	failingStatuses?: string[];
 	pendingStatuses?: string[];
 	statusDetails?: CheckSummary[];
+	/** Truncated failure-log snippets for newly failing checks (best-effort). */
+	failureLogs?: FailureLogInfo[];
 }
 
 // ---------------------------------------------------------------------------
@@ -385,6 +396,77 @@ export function snapshotPR(pr: PullRequestData, ignoredBots: string[]): PRStatus
 		pendingStatuses: pendingStatuses(pr),
 		statusDetails: statusChecks,
 	};
+}
+
+// ---------------------------------------------------------------------------
+// CI failure log extraction (#93)
+// ---------------------------------------------------------------------------
+
+/** Maximum number of log lines kept in a failure-log snippet. */
+export const FAILURE_LOG_MAX_LINES = 50;
+
+/** Conclusions for which we attempt to fetch logs (CANCELLED runs usually have none). */
+const LOGGABLE_FAILURE_CONCLUSIONS: Set<string> = new Set(["FAILURE", "ERROR", "TIMED_OUT", "ACTION_REQUIRED"]);
+
+/**
+ * Extract a truncated snippet from a raw failure log.
+ *
+ * Keeps the first `maxLines` lines (default 50) and appends an ellipsis
+ * marker when content was dropped. Normalizes CRLF line endings.
+ */
+export function extractLogSnippet(log: string, maxLines: number = FAILURE_LOG_MAX_LINES): string {
+	if (!log) return "";
+	const lines = log.replace(/\r\n/g, "\n").split("\n");
+	if (lines.length <= maxLines) return lines.join("\n");
+	return lines.slice(0, maxLines).join("\n") + "\n…truncated";
+}
+
+/** A single entry of `gh run list --json databaseId,name,conclusion` output. */
+interface GhRunListEntry {
+	databaseId?: unknown;
+	name?: unknown;
+	conclusion?: unknown;
+}
+
+/**
+ * Parse the JSON output of `gh run list --json databaseId,name,conclusion`
+ * and return the failed runs. Defensive: returns [] on invalid JSON or
+ * unexpected shapes rather than throwing.
+ */
+export function parseFailedRuns(ghRunListJson: string): { runId: number; name: string }[] {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(ghRunListJson);
+	} catch {
+		return [];
+	}
+	if (!Array.isArray(parsed)) return [];
+	const failed: { runId: number; name: string }[] = [];
+	for (const entry of parsed as GhRunListEntry[]) {
+		if (!entry || typeof entry !== "object") continue;
+		if (typeof entry.databaseId !== "number" || typeof entry.name !== "string") continue;
+		const conclusion = String(entry.conclusion ?? "").toUpperCase();
+		if (!LOGGABLE_FAILURE_CONCLUSIONS.has(conclusion)) continue;
+		failed.push({ runId: entry.databaseId, name: entry.name });
+	}
+	return failed;
+}
+
+/**
+ * Format a failure-log detail block for the agent notification.
+ * Rendered as fenced code blocks so markdown rendering keeps the log intact.
+ */
+function formatFailureLogBlock(logs: FailureLogInfo[]): string {
+	const lines: string[] = ["", "CI failure log details:"];
+	for (const f of logs) {
+		lines.push(`Job ${f.jobName}${f.runId != null ? ` (run ${f.runId})` : ""}:`);
+		lines.push("  ```");
+		for (const l of f.snippet.split("\n")) {
+			lines.push(`  ${l}`);
+		}
+		lines.push("  ```");
+	}
+	return lines.join("\n");
 }
 
 /** Build template variables from a MonitorConfig. */
@@ -968,6 +1050,12 @@ export function formatAgentNotification(status: PRStatus, config: MonitorConfig,
 		}
 	}
 
+	// CI failure log snippets (only present when failures are newly detected)
+	const failureLogs = status.failureLogs ?? [];
+	if (failureLogs.length > 0) {
+		detailLines.push(formatFailureLogBlock(failureLogs));
+	}
+
 	const detailed = detailLines.length > 0
 		? `${concise}\n${detailLines.join("\n")}`
 		: concise;
@@ -1009,6 +1097,13 @@ export function formatAgentStatusUpdate(prev: PRStatus | null, curr: PRStatus, c
 		for (const c of newComments) {
 			detailLines.push(formatCommentDetailBlock(c));
 		}
+	}
+
+	// CI failure log snippets — only when this update actually reports failing checks,
+	// so reminders/repeat polls don't re-send stale logs.
+	const failureLogs = curr.failureLogs ?? [];
+	if (concise && failureLogs.length > 0) {
+		detailLines.push(formatFailureLogBlock(failureLogs));
 	}
 
 	const detailed = detailLines.length > 0
