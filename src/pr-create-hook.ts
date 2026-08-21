@@ -4,9 +4,9 @@
  */
 
 // Re-export the ParsedPR type for test use
-export type { ParsedPR } from "./index";
+export type { ParsedSelector as ParsedPR } from "./keys";
 
-import type { ParsedPR } from "./index";
+import type { ParsedSelector as ParsedPR } from "./keys";
 
 // ---------------------------------------------------------------------------
 // PR URL regex (same as in index.ts)
@@ -81,7 +81,7 @@ export function parsePRUrlsFromOutput(output: string): ParsedPR[] {
 
 /** Default nudge template */
 export const DEFAULT_PR_CREATE_NUDGE =
-	"🔔 PR {prLabel} was just created ({prUrl}). Consider starting PR monitoring with ghpr-monitor(action='start', url='{prUrl}') to track review comments, merge conflicts, and CI status.";
+	"📡 Monitor this PR with ghpr-monitor(action='start', url='{prUrl}') to track review comments, merge conflicts, and CI status.";
 
 /**
  * Available template variables for the prCreateNudge preference:

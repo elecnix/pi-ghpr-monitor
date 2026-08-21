@@ -24,7 +24,7 @@
 import { describe, it, expect } from "vitest";
 import { Text, Markdown, getCapabilities, setCapabilities } from "@earendil-works/pi-tui";
 import { getMarkdownTheme, initTheme } from "@earendil-works/pi-coding-agent";
-import { linkifyPRRefs } from "../src/analyzer";
+import { linkifyPRRefs } from "../src/render";
 
 try {
 	initTheme("dark");
