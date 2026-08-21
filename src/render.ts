@@ -232,7 +232,8 @@ export function formatMonitorStatusLine(config: MonitorConfig, state: MonitorSta
 				? `https://${config.host}/${config.owner}/${config.repo}/issues/${config.number}`
 				: `https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
 	const autoMergeTag = config.autoMerge && config.resourceType === "pr" ? " 🔀auto-merge" : "";
-	const header = `Monitoring ${url} (interval: ${config.intervalSec}s${autoMergeTag})`;
+	const wakeTag = config.wakeOn?.length ? ` ⏰wake:${config.wakeOn.join(",")}` : "";
+	const header = `Monitoring ${url} (interval: ${config.intervalSec}s${autoMergeTag})${wakeTag}`;
 	const ts = state?.lastChecked ? state.lastChecked.toLocaleString() : "unknown";
 
 	if (!state) return `${header}\n  No status update received yet.`;

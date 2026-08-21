@@ -38,6 +38,12 @@ export interface MonitorConfig {
 	 *  "new-failing-checks", "merged", "run-completed"). Matching is
 	 *  case-insensitive; unknown kinds are rejected by `gh monitor`. */
 	events?: string[];
+	/** Event kinds whose notifications wake the agent (start a turn), e.g.
+	 *  ["new-failing-checks", "merged"]. "*" wakes on every event except
+	 *  "first-poll". Omit for informational-only notifications (the agent
+	 *  sees them on its next turn without being woken). Matching is
+	 *  case-insensitive. */
+	wakeOn?: string[];
 }
 
 export interface ParsedSelector {
