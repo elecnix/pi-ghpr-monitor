@@ -79,6 +79,22 @@ import { setSessionId, enableDebug, disableDebug, isDebugEnabled, closeLogger, l
 import { isPRCreateCommand, parsePRUrlsFromOutput, createPRCreateNudge } from "./pr-create-hook";
 import { isIssueCreateCommand, parseIssueUrlsFromOutput, createIssueCreateNudge } from "./issue-create-hook";
 import { type FailureLogInfo, headCommitOid, fetchFailureLogsForCommit, formatFailureLogBlock } from "./failure-logs";
+import {
+	type DeploymentSnapshot,
+	allDeploymentsTerminal,
+	formatDeploymentUpdate,
+	fetchDeploymentsForSha,
+	fetchMergedHeadOid,
+} from "./deployments";
+
+// ---------------------------------------------------------------------------
+// Post-merge deployment tracking (#85)
+// ---------------------------------------------------------------------------
+
+/** Consecutive empty deployment polls before giving up (repo doesn't use deployments). */
+const MAX_DEPLOY_EMPTY_POLLS = 3;
+/** Consecutive deployment poll errors before giving up (e.g. gh unavailable). */
+const MAX_DEPLOY_ERRORS = 5;
 
 // ---------------------------------------------------------------------------
 // Active monitor entry
@@ -94,6 +110,10 @@ export interface ActiveMonitor {
 	autoMergeNotified: boolean;
 	/** Set when the monitor exited (so late events are ignored). */
 	exited: boolean;
+	/** Post-merge deployment tracking state (#85), or null while the monitor
+	 *  is still watching the PR itself. Once set, the adapter polls deployment
+	 *  statuses on the merged head SHA (gh monitor has auto-stopped). */
+	deployTracking: DeployTrackingState | null;
 	/**
 	 * API surface of the current `degraded` episode ("graphql", "rest", …),
 	 * or null when the last poll succeeded. Used to surface a degraded event
@@ -108,6 +128,21 @@ export interface ActiveMonitor {
 	failureLogsFetching: boolean;
 }
 
+interface DeployTrackingState {
+	/** Merged head commit SHA whose deployments are being watched. */
+	sha: string;
+	/** Pending next-poll timer (cleared on stop/shutdown). */
+	timer: ReturnType<typeof setTimeout> | null;
+	/** Last deployment snapshots, for transition diffing. */
+	lastSnapshots: DeploymentSnapshot[] | null;
+	/** Consecutive polls with zero deployments (grace period). */
+	emptyPolls: number;
+	/** Consecutive poll errors. */
+	errorCount: number;
+	/** Set when tracking ended or was cancelled. */
+	stopped: boolean;
+}
+
 function createActiveMonitor(config: MonitorConfig): ActiveMonitor {
 	return {
 		config,
@@ -117,6 +152,7 @@ function createActiveMonitor(config: MonitorConfig): ActiveMonitor {
 		lastNudgeTime: 0,
 		autoMergeNotified: false,
 		exited: false,
+		deployTracking: null,
 		lastDegradedSurface: null,
 		failureLogsOid: null,
 		failureLogs: [],
@@ -432,6 +468,19 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			return;
 		}
 
+		// Post-merge deployment monitoring (#85): deliver the merged event, then
+		// — when opted in — transition this monitor into deployment tracking
+		// instead of dying with gh monitor's auto-stop.
+		if (n.type === "merged") {
+			deliver(concise, detailed, host, key, wake);
+			mon.lastSentUpdate = concise;
+			mon.lastNudgeTime = Date.now();
+			if (config.resourceType === "pr" && config.trackDeployments) {
+				startDeployTracking(key, mon);
+			}
+			return;
+		}
+
 		deliver(concise, detailed, host, key, wake);
 		mon.lastSentUpdate = concise;
 		mon.lastNudgeTime = Date.now();
@@ -483,6 +532,133 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		sendPRNotification(concise, detailed, { host, wake });
 	}
 
+	// -------------------------------------------------------------------
+	// Post-merge deployment tracking (#85)
+	// -------------------------------------------------------------------
+
+	/**
+	 * Transition a merged PR monitor into deployment tracking. Resolves the
+	 * merged head SHA, then polls the Deployments REST API every intervalSec
+	 * until a terminal state, the empty-grace period expires, or errors
+	 * accumulate. The polling interval carries over from the PR monitor config.
+	 */
+	function startDeployTracking(key: string, mon: ActiveMonitor): void {
+		const config = mon.config;
+		mon.deployTracking = {
+			sha: "",
+			timer: null,
+			lastSnapshots: null,
+			emptyPolls: 0,
+			errorCount: 0,
+			stopped: false,
+		};
+
+		void (async () => {
+			const prLabel = `${config.owner}/${config.repo}#${config.number}`;
+			let sha: string | null = null;
+			try {
+				sha = await fetchMergedHeadOid(config);
+			} catch (err) {
+				log(`Deploy tracking: head OID lookup failed for ${key}: ${err instanceof Error ? err.message : String(err)}`);
+			}
+			const dt = mon.deployTracking;
+			if (!sha || !dt || dt.stopped) {
+				finishDeployTracking(key, mon, `⚠️ Could not resolve the merged head commit for ${prLabel}; deployment monitoring stopped.`);
+				return;
+			}
+			dt.sha = sha;
+			log(`Deploy tracking: watching deployments on ${sha} for ${key}`);
+			const msg = `🔀 ${prLabel} was merged. Watching deployments on ${sha.slice(0, 7)}...`;
+			deliver(msg, msg, config.host, key, shouldWake(mon, "deployment-status"));
+			await pollDeploymentsOnce(key, mon);
+		})();
+	}
+
+	/**
+	 * One deployment poll cycle. Sends notifications for status transitions
+	 * and stops tracking when all deployments reached a terminal state, when
+	 * no deployments appear within the grace period (repo doesn't use GitHub
+	 * Deployments), or after too many consecutive errors. Schedules the next
+	 * poll otherwise.
+	 */
+	async function pollDeploymentsOnce(key: string, mon: ActiveMonitor): Promise<void> {
+		const dt = mon.deployTracking;
+		if (!dt || dt.stopped) return;
+		const config = mon.config;
+		const prLabel = `${config.owner}/${config.repo}#${config.number}`;
+
+		let snapshots: DeploymentSnapshot[];
+		try {
+			snapshots = await fetchDeploymentsForSha(`${config.owner}/${config.repo}`, dt.sha);
+			dt.errorCount = 0;
+		} catch (err) {
+			dt.errorCount++;
+			const errMsg = err instanceof Error ? err.message : String(err);
+			log(`Deploy poll error for ${key}: ${errMsg}`);
+			uiCtx?.notify(`Deployment poll error for ${prLabel}: ${errMsg}`, "warning");
+			if (dt.errorCount >= MAX_DEPLOY_ERRORS) {
+				finishDeployTracking(key, mon, `⚠️ Deployment monitoring for ${prLabel} (${dt.sha.slice(0, 7)}) stopped after ${MAX_DEPLOY_ERRORS} consecutive errors: ${errMsg}`);
+				return;
+			}
+			scheduleNextDeployPoll(key, mon);
+			return;
+		}
+
+		const update = formatDeploymentUpdate(dt.lastSnapshots, snapshots, prLabel);
+		const terminal = allDeploymentsTerminal(snapshots);
+		if (update) {
+			const detailed = terminal
+				? `${update}\nAll deployments reached a terminal state. Monitoring stopped.`
+				: update;
+			deliver(update, detailed, config.host, key, shouldWake(mon, "deployment-status"));
+			mon.lastNudgeTime = Date.now();
+		}
+		dt.lastSnapshots = snapshots;
+
+		if (snapshots.length === 0) {
+			dt.emptyPolls++;
+			if (dt.emptyPolls >= MAX_DEPLOY_EMPTY_POLLS) {
+				finishDeployTracking(key, mon, `📭 No deployments found for ${prLabel} (${dt.sha.slice(0, 7)}). Monitoring stopped.`);
+				return;
+			}
+		} else {
+			dt.emptyPolls = 0;
+			if (terminal) {
+				// Final transition notification (if any) was already sent above.
+				finishDeployTracking(key, mon, null);
+				return;
+			}
+		}
+
+		scheduleNextDeployPoll(key, mon);
+	}
+
+	function scheduleNextDeployPoll(key: string, mon: ActiveMonitor): void {
+		const dt = mon.deployTracking;
+		if (!dt || dt.stopped) return;
+		const timer = setTimeout(() => void pollDeploymentsOnce(key, mon), Math.max(10, mon.config.intervalSec) * 1000);
+		// Don't keep the process alive just for the next deploy poll.
+		timer.unref?.();
+		dt.timer = timer;
+	}
+
+	/** End deployment tracking: clear the timer, notify, and remove the monitor. */
+	function finishDeployTracking(key: string, mon: ActiveMonitor, finalMsg: string | null): void {
+		const dt = mon.deployTracking;
+		if (dt) {
+			dt.stopped = true;
+			if (dt.timer) clearTimeout(dt.timer);
+			dt.timer = null;
+		}
+		mon.deployTracking = null;
+		if (finalMsg) {
+			deliver(finalMsg, finalMsg, mon.config.host, key, true);
+		}
+		log(`Deploy tracking finished for ${key}${finalMsg ? ": notified" : ""}`);
+		monitors.delete(key);
+		updateFooter();
+	}
+
 	function handleExit(key: string, mon: ActiveMonitor, code: number | null, stderr: string): void {
 		if (mon.exited) return;
 		mon.exited = true;
@@ -497,6 +673,14 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		} else {
 			log(`Monitor ${key} exited cleanly`);
 		}
+		// Post-merge deployment tracking (#85): when the clean exit is gh
+		// monitor's auto-stop after the merged event and deploy tracking is
+		// active, keep the monitor entry alive — the adapter now owns the
+		// polling and the user can still stop it via /ghpr-monitor off.
+		if (mon.deployTracking && !mon.deployTracking.stopped) {
+			updateFooter();
+			return;
+		}
 		monitors.delete(key);
 		updateFooter();
 	}
@@ -508,6 +692,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		mon.exited = true;
 		mon.handle?.abort();
 		mon.handle = null;
+		cancelDeployTracking(mon);
 		monitors.delete(key);
 		updateFooter();
 		return `Stopped monitoring ${resourceUrl(mon.config)}`;
@@ -521,10 +706,20 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			mon.exited = true;
 			mon.handle?.abort();
 			mon.handle = null;
+			cancelDeployTracking(mon);
 		}
 		monitors.clear();
 		updateFooter();
 		return `Stopped monitoring ${keys.length} resource(s): ${keys.join(", ")}`;
+	}
+
+	/** Cancel any active deployment tracking (#85): clear its timer. */
+	function cancelDeployTracking(mon: ActiveMonitor): void {
+		const dt = mon.deployTracking;
+		if (!dt) return;
+		dt.stopped = true;
+		if (dt.timer) clearTimeout(dt.timer);
+		dt.timer = null;
 	}
 
 	function updateFooter() {
@@ -837,6 +1032,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		interval: Type.Optional(Type.Number({ description: "Polling interval in seconds (default: 60, minimum: 10)" })),
 		events: Type.Optional(Type.Array(Type.String(), { description: "Per-event-kind allowlist forwarded to `gh monitor --events`. When set, only the listed event kinds are emitted; all others are suppressed. Omit to receive every kind (the default). Entries are notification template keys, e.g. 'conflict', 'new-failing-checks', 'merged', 'closed', 'run-completed'. Matching is case-insensitive; unknown kinds are rejected by the CLI." })),
 		wakeOn: Type.Optional(Type.Array(Type.String(), { description: "Event kinds that wake the agent (start a turn) when emitted, e.g. ['new-failing-checks', 'new-unresolved-threads', 'conflict', 'merged']. Use ['*'] to wake on every event (except the initial first-poll snapshot). Omit for informational-only notifications that never start a turn (the default). Matching is case-insensitive." })),
+		track_deployments: Type.Optional(Type.Boolean({ description: "After the PR merges, keep polling GitHub deployment statuses for the merged commit until they reach a terminal state (success/failure/error/inactive). Default: false." })),
 		value: Type.Optional(Type.String({ description: "For preferences action: JSON string with preference overrides. Omit to read current preferences." })),
 	}) as any;
 
@@ -852,6 +1048,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			"Accept a GitHub PR URL, shorthand like 'owner/repo#123', or separate owner/repo/pr_number.",
 			"When starting a monitor, pass wakeOn with the event kinds that should start a turn, e.g. wakeOn=['new-failing-checks', 'conflict'] or wakeOn=['*'] for every event. Without wakeOn, notifications are informational only — they never start a turn. Choose wake events whenever the user expects you to react (fix CI, reply to reviews) without being prompted.",
 			"To watch a standalone GitHub Actions workflow run, pass run_id with owner+repo (no pr_number). The monitor polls the run until status == 'completed', then auto-stops and notifies with the conclusion (success, failure, cancelled, etc.).",
+			"Set track_deployments=true when starting a PR monitor to keep watching GitHub deployment statuses after the PR merges — the monitor notifies on deployment transitions (pending → in_progress → success/failure/error/inactive), auto-stops when they all reach a terminal state, and stops after a few polls if the repo has no deployments.",
 			"Use action='status' to see all currently monitored PRs/runs.",
 			"Use action='check' to trigger an immediate poll.",
 			"Use action='merge' to toggle auto-merge when CI passes (if not disabled by the disableMergeTool preference). When enabled, the monitor will notify you to merge the PR once CI turns green.",
@@ -906,7 +1103,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					}
 					const resolved = resolvePR();
 					if ("error" in resolved) return { content: [{ type: "text", text: resolved.error }], details: { action: "start", status: "missing_params" } };
-					const config: MonitorConfig = { owner: resolved.owner, repo: resolved.repo, number: resolved.number, host: resolved.host, resourceType: resolved.resourceType, mode: params.mode || "all", intervalSec: Math.max(10, params.interval || 60), events: params.events, wakeOn: params.wakeOn };
+					const config: MonitorConfig = { owner: resolved.owner, repo: resolved.repo, number: resolved.number, host: resolved.host, resourceType: resolved.resourceType, mode: params.mode || "all", intervalSec: Math.max(10, params.interval || 60), events: params.events, wakeOn: params.wakeOn, trackDeployments: params.track_deployments === true };
 					const result = startMonitor(config);
 					return { content: [{ type: "text", text: result.message }], details: { action: "start", status: result.alreadyMonitoring ? "already_running" : "started", config, activeMonitors: monitors.size } };
 				}
