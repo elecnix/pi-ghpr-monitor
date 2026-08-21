@@ -44,6 +44,9 @@ export interface MonitorConfig {
 	 *  sees them on its next turn without being woken). Matching is
 	 *  case-insensitive. */
 	wakeOn?: string[];
+	/** Opt-in (#85): after the PR merges, keep polling deployment statuses on
+	 *  the merged head commit until they reach a terminal state. */
+	trackDeployments?: boolean;
 }
 
 export interface ParsedSelector {

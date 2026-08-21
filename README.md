@@ -179,6 +179,11 @@ The tool accepts these parameters:
 | `mode`      | string | `all`   | Watch mode: `all`, `comments`, `conflicts`, `actions` |
 | `interval`  | number | `60`    | Polling interval in seconds (minimum: 10)      |
 | `events`    | array  | —       | Per-event-kind allowlist. When set, only notifications whose detected kinds intersect this list are delivered; all others are suppressed. Omit to receive every kind (the default). Entries are notification template keys, e.g. `conflict`, `new-failing-checks`, `merged`, `closed`, `run-completed`. Matching is case-insensitive; unknown kinds are rejected. |
+| `track_deployments` | boolean | `false` | After the PR merges, keep polling GitHub deployment statuses for the merged commit until they reach a terminal state (`success`/`failure`/`error`/`inactive`). Notifies on transitions, auto-stops on terminal state, and stops after a few polls if the repo has no deployments. |
+
+## Post-merge deployment monitoring
+
+By default the monitor stops when the PR merges. With `track_deployments=true`, the adapter keeps watching the deployments created for the merged head commit (via the GitHub Deployments REST API) and notifies the agent on each status transition — e.g. pending → in_progress → success/failure/error/inactive. Tracking ends when every deployment reaches a terminal state; if the repository doesn't use GitHub Deployments, it stops gracefully after a few empty polls. The polling interval carries over from the PR monitor's `interval`.
 
 ## Requirements
 
