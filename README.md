@@ -17,7 +17,7 @@ When you're working on a PR, you want your AI agent to stay informed about chang
 
 ### Smart Notification Delivery
 
-- **Informational, never turn-triggering** — status notifications are delivered as custom messages: shown in the TUI and appended to the agent's conversation history, so the agent sees them on its next turn without being woken up. Only the deliberate PR/issue create-hook nudges and explicit user commands (`/ghpr-monitor !`, steer messages) start a turn.
+- **Informational by default, wakeOn for actionable events** — notifications are delivered as custom messages: shown in the TUI and appended to the agent's conversation history, so the agent sees them on its next turn without being woken up. Pass `wakeOn` when starting a monitor (event kinds, or `[*]` for all) to have those events start a turn via `sendMessage(..., { deliverAs: "followUp", triggerTurn: true })` — waking an idle agent without ever interrupting mid-turn work. `first-poll` never wakes; the deliberate PR/issue create-hook nudges and explicit user commands (`/ghpr-monitor !`, steer messages) always do.
 - **Degraded-API events are deduped** — while an API surface is down (e.g. rate-limited), the CLI re-emits a `degraded` event on every failed poll; the adapter surfaces only the first event per episode so the agent's context is not spammed. Any successful poll ends the episode.
 - **Throttled during active turns** — updates are queued while the agent is working, then flushed at turn end. No mid-turn steering, no spam.
 - **Reminders after idle** — if actionable items remain when the agent finishes a turn, a nudge is sent on the next poll cycle so nothing falls through the cracks.

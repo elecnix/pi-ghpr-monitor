@@ -137,7 +137,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	const nudgedPRKeys: Set<string> = new Set();
 	const nudgedIssueKeys: Set<string> = new Set();
 	let agentTurnActive = false;
-	let queuedUpdates: Array<{ concise: string; detailed: string; host: string; monitorKey: string }> = [];
+	let queuedUpdates: Array<{ concise: string; detailed: string; host: string; monitorKey: string; wake: boolean }> = [];
 	let queuedPrCreateNudges: Array<{ message: string; host: string }> = [];
 	let queuedIssueCreateNudges: Array<{ message: string; host: string }> = [];
 	let uiCtx: ExtensionUIContext | undefined;
@@ -150,7 +150,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	let currentAdapterPrefs: AdapterPrefs = loadAdapterPrefs();
 	log(`Loaded adapter prefs: ${JSON.stringify(currentAdapterPrefs)}`);
 
-	const STEERING_PROMPT = `You have access to the ghpr-monitor tool. When the user asks you to watch or monitor a PR, use ghpr-monitor with action "start" to begin monitoring. The tool has actions: start, status, check, merge, stop, and preferences. Multiple PRs/runs can be monitored simultaneously. You can stop monitoring with action='stop' — but treat stopping as an explicit last resort: only stop a monitor when it is known to be obsolete or redundant (e.g. the same resource is already monitored elsewhere, or the task that needed it is done). The user can also stop via /ghpr-monitor off (stops all) or /ghpr-monitor off <PR> (stops specific). The user can also run /ghpr-monitor check to trigger an immediate poll (all PRs or a specific one). You will receive PR status updates as notifications. The url parameter accepts GitHub PR URLs or shorthand like "owner/repo#123". To watch a standalone GitHub Actions workflow run by id, pass run_id with owner+repo (no pr_number): the monitor polls the run until status becomes "completed", then auto-stops and notifies with the conclusion (success, failure, cancelled, etc.). Use action='preferences' to view or update notification prompt preferences. Calling with no value shows current preferences (with defaults); providing a value in JSON writes new preferences. Set a key to null to reset it to default. Use action='merge' to toggle auto-merge when CI passes (if not disabled by the disableMergeTool preference). When enabled, the monitor will notify you to merge the PR once CI turns green.`;
+	const STEERING_PROMPT = `You have access to the ghpr-monitor tool. When the user asks you to watch or monitor a PR, use ghpr-monitor with action "start" to begin monitoring. The tool has actions: start, status, check, merge, stop, and preferences. Multiple PRs/runs can be monitored simultaneously. You can stop monitoring with action='stop' — but treat stopping as an explicit last resort: only stop a monitor when it is known to be obsolete or redundant (e.g. the same resource is already monitored elsewhere, or the task that needed it is done). The user can also stop via /ghpr-monitor off (stops all) or /ghpr-monitor off <PR> (stops specific). The user can also run /ghpr-monitor check to trigger an immediate poll (all PRs or a specific one). You will receive PR status updates as notifications. The url parameter accepts GitHub PR URLs or shorthand like "owner/repo#123". To watch a standalone GitHub Actions workflow run by id, pass run_id with owner+repo (no pr_number): the monitor polls the run until status becomes "completed", then auto-stops and notifies with the conclusion (success, failure, cancelled, etc.). Use action='preferences' to view or update notification prompt preferences. Calling with no value shows current preferences (with defaults); providing a value in JSON writes new preferences. Set a key to null to reset it to default. Use action='merge' to toggle auto-merge when CI passes (if not disabled by the disableMergeTool preference). When enabled, the monitor will notify you to merge the PR once CI turns green. Notifications are informational by default (they never start a turn); pass wakeOn when starting a monitor — a list of event kinds or ['*'] — to have those events wake you so you can react without the user prompting you.`;
 
 	// Custom message renderer for "ghpr-monitor" messages — shows only the
 	// concise summary in the TUI; the agent receives the full content via the
@@ -175,20 +175,26 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	});
 
 	/**
-	 * Deliver a monitor notification to both the TUI (CustomMessage, concise
+	 * Deliver a monitor notification to the TUI (CustomMessage, concise
 	 * summary via the ghpr-monitor renderer) and the agent's LLM context
 	 * (full detailed body).
 	 *
-	 * Notifications are INFORMATIONAL and must never trigger a turn on their
-	 * own: pi.sendUserMessage() always starts a new agent turn, so it is only
-	 * used here when an explicit deliverAs is passed (the deliberate PR/issue
-	 * create-hook nudges). Without it, delivery is a plain custom message:
-	 * when the agent is idle it is appended to the conversation history — the
-	 * agent sees it on its next turn without being woken. While the agent is
-	 * mid-turn the caller queues and flushes at turn_end instead (see
+	 * Delivery modes:
+	 * - Default (informational): a plain custom message — shown in the TUI
+	 *   and appended to the conversation history; the agent sees it on its
+	 *   next turn without being woken.
+	 * - wake: the monitor's wakeOn list matched this event kind. The message
+	 *   is sent with deliverAs "followUp" + triggerTurn, so it starts a turn
+	 *   when the agent is idle and is delivered right after the current turn
+	 *   when it is mid-work — never an interrupt.
+	 * - deliverAs "steer": reserved for the deliberate PR/issue create-hook
+	 *   nudges, which must always reach the agent in direct response to its
+	 *   own action.
+	 *
+	 * While the agent is mid-turn, callers queue and flush at turn_end (see
 	 * deliver()). See render.ts/linkifyPRRefs for the format split.
 	 */
-	function sendPRNotification(concise: string, detailed: string, options?: { deliverAs?: "steer" | "followUp" | "nextTurn"; host?: string; displayOnly?: boolean }) {
+	function sendPRNotification(concise: string, detailed: string, options?: { deliverAs?: "steer"; host?: string; displayOnly?: boolean; wake?: boolean }) {
 		const delivery = options?.deliverAs;
 		const linkifyHost = options?.host ?? "github.com";
 		const markdownDetailed = linkifyPRRefs(detailed, linkifyHost, "markdown");
@@ -198,12 +204,16 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			pi.sendUserMessage(markdownDetailed, { deliverAs: delivery });
 		}
 
+		// Wake delivery (monitor's wakeOn matched): a single custom message
+		// that starts a turn when the agent is idle and is delivered after the
+		// current turn when it is mid-work — never an interrupt. Informational
+		// delivery (no wake) appends the message without triggering anything.
 		pi.sendMessage({
 			customType: "ghpr-monitor",
 			content: markdownDetailed,
 			display: !delivery || options?.displayOnly ? true : false,
 			details: { concise: linkifiedConcise },
-		});
+		}, options?.wake ? { deliverAs: "followUp", triggerTurn: true } : undefined);
 	}
 
 	// Track agent turn state to avoid spamming updates while the LLM is working.
@@ -215,8 +225,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		agentTurnActive = false;
 		if (queuedUpdates.length > 0) {
 			for (const u of queuedUpdates) {
-				// Informational: visible to the agent next turn, no new turn.
-				sendPRNotification(u.concise, u.detailed, { host: u.host });
+				sendPRNotification(u.concise, u.detailed, { host: u.host, wake: u.wake });
 			}
 			queuedUpdates = [];
 		}
@@ -320,6 +329,19 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		return { key, message: `Started monitoring ${resourceUrl(config)} (interval: ${config.intervalSec}s)` };
 	}
 
+	/**
+	 * Whether a notification of this kind should wake the agent (start a
+	 * turn) for this monitor. Driven by the monitor's `wakeOn` list: event
+	 * kinds (case-insensitive) or "*" for all. first-poll never wakes — it
+	 * is the initial state snapshot, not a change.
+	 */
+	function shouldWake(mon: ActiveMonitor, type: string): boolean {
+		const wakeOn = mon.config.wakeOn;
+		if (!wakeOn || wakeOn.length === 0) return false;
+		if (type === "first-poll") return false;
+		return wakeOn.some((k) => k === "*" || k.toLowerCase() === type.toLowerCase());
+	}
+
 	function handleNotification(key: string, mon: ActiveMonitor, n: Notification): void {
 		if (mon.exited) return;
 
@@ -358,6 +380,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		const host = config.host;
 		const concise = n.message;
 		const detailed = n.detail ? `${n.message}\n\n${n.detail}` : n.message;
+		const wake = shouldWake(mon, n.type);
 
 		// first-poll is informational: TUI-only, no agent turn.
 		if (n.type === "first-poll") {
@@ -378,7 +401,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				getAdapterPref("ciGreenMerge", currentAdapterPrefs) as string,
 				vars,
 			);
-			deliver(concise, `${detailed}\n\n${mergeMsg}`, host, key);
+			deliver(concise, `${detailed}\n\n${mergeMsg}`, host, key, wake);
 			mon.lastSentUpdate = concise;
 			mon.lastNudgeTime = Date.now();
 			return;
@@ -390,19 +413,18 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			mon.autoMergeNotified = false;
 		}
 
-		deliver(concise, detailed, host, key);
+		deliver(concise, detailed, host, key, wake);
 		mon.lastSentUpdate = concise;
 		mon.lastNudgeTime = Date.now();
 	}
 
 	/** Deliver now, or queue for turn_end if the agent is mid-turn. */
-	function deliver(concise: string, detailed: string, host: string, monitorKey: string): void {
+	function deliver(concise: string, detailed: string, host: string, monitorKey: string, wake: boolean): void {
 		if (agentTurnActive) {
-			queuedUpdates.push({ concise, detailed, host, monitorKey });
+			queuedUpdates.push({ concise, detailed, host, monitorKey, wake });
 			return;
 		}
-		// Informational: visible to the agent next turn, no new turn.
-		sendPRNotification(concise, detailed, { host });
+		sendPRNotification(concise, detailed, { host, wake });
 	}
 
 	function handleExit(key: string, mon: ActiveMonitor, code: number | null, stderr: string): void {
@@ -518,10 +540,10 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				const concise = n.message;
 				const detailed = n.detail ? `${n.message}\n\n${n.detail}` : n.message;
 				if (agentTurnActive) {
-					queuedUpdates.push({ concise, detailed, host: config.host, monitorKey: key });
+					queuedUpdates.push({ concise, detailed, host: config.host, monitorKey: key, wake: true });
 				} else {
-					// Informational: visible to the agent next turn, no new turn.
-					sendPRNotification(concise, detailed, { host: config.host });
+					// User-initiated check: always wake the agent with the result.
+					sendPRNotification(concise, detailed, { host: config.host, wake: true });
 				}
 			}
 			if (mon) mon.lastNudgeTime = Date.now();
@@ -758,6 +780,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		mode: Type.Optional(Type.Union([Type.Literal("all"), Type.Literal("comments"), Type.Literal("conflicts"), Type.Literal("actions")])),
 		interval: Type.Optional(Type.Number({ description: "Polling interval in seconds (default: 60, minimum: 10)" })),
 		events: Type.Optional(Type.Array(Type.String(), { description: "Per-event-kind allowlist forwarded to `gh monitor --events`. When set, only the listed event kinds are emitted; all others are suppressed. Omit to receive every kind (the default). Entries are notification template keys, e.g. 'conflict', 'new-failing-checks', 'merged', 'closed', 'run-completed'. Matching is case-insensitive; unknown kinds are rejected by the CLI." })),
+		wakeOn: Type.Optional(Type.Array(Type.String(), { description: "Event kinds that wake the agent (start a turn) when emitted, e.g. ['new-failing-checks', 'new-unresolved-threads', 'conflict', 'merged']. Use ['*'] to wake on every event (except the initial first-poll snapshot). Omit for informational-only notifications that never start a turn (the default). Matching is case-insensitive." })),
 		value: Type.Optional(Type.String({ description: "For preferences action: JSON string with preference overrides. Omit to read current preferences." })),
 	}) as any;
 
@@ -771,6 +794,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			"When the user asks you to watch or monitor a PR, use ghpr-monitor with action='start'.",
 			"Multiple PRs can be monitored at the same time — start a new monitor without stopping existing ones.",
 			"Accept a GitHub PR URL, shorthand like 'owner/repo#123', or separate owner/repo/pr_number.",
+			"When starting a monitor, pass wakeOn with the event kinds that should start a turn, e.g. wakeOn=['new-failing-checks', 'conflict'] or wakeOn=['*'] for every event. Without wakeOn, notifications are informational only — they never start a turn. Choose wake events whenever the user expects you to react (fix CI, reply to reviews) without being prompted.",
 			"To watch a standalone GitHub Actions workflow run, pass run_id with owner+repo (no pr_number). The monitor polls the run until status == 'completed', then auto-stops and notifies with the conclusion (success, failure, cancelled, etc.).",
 			"Use action='status' to see all currently monitored PRs/runs.",
 			"Use action='check' to trigger an immediate poll.",
@@ -820,13 +844,13 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 						if (!params.owner || !params.repo) {
 							return { content: [{ type: "text", text: "run_id requires owner and repo. Example: ghpr-monitor(action='start', owner='owner', repo='repo', run_id=30433642)" }], details: { action: "start", status: "missing_params", target: "run" } };
 						}
-						const config: MonitorConfig = { owner: params.owner, repo: params.repo, number: 0, host: "github.com", resourceType: "run", mode: params.mode || "all", intervalSec: Math.max(10, params.interval || 60), runId: params.run_id, events: params.events };
+						const config: MonitorConfig = { owner: params.owner, repo: params.repo, number: 0, host: "github.com", resourceType: "run", mode: params.mode || "all", intervalSec: Math.max(10, params.interval || 60), runId: params.run_id, events: params.events, wakeOn: params.wakeOn };
 						const result = startMonitor(config);
 						return { content: [{ type: "text", text: result.message }], details: { action: "start", status: result.alreadyMonitoring ? "already_running" : "started", config, activeMonitors: monitors.size } };
 					}
 					const resolved = resolvePR();
 					if ("error" in resolved) return { content: [{ type: "text", text: resolved.error }], details: { action: "start", status: "missing_params" } };
-					const config: MonitorConfig = { owner: resolved.owner, repo: resolved.repo, number: resolved.number, host: resolved.host, resourceType: resolved.resourceType, mode: params.mode || "all", intervalSec: Math.max(10, params.interval || 60), events: params.events };
+					const config: MonitorConfig = { owner: resolved.owner, repo: resolved.repo, number: resolved.number, host: resolved.host, resourceType: resolved.resourceType, mode: params.mode || "all", intervalSec: Math.max(10, params.interval || 60), events: params.events, wakeOn: params.wakeOn };
 					const result = startMonitor(config);
 					return { content: [{ type: "text", text: result.message }], details: { action: "start", status: result.alreadyMonitoring ? "already_running" : "started", config, activeMonitors: monitors.size } };
 				}
