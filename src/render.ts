@@ -171,6 +171,44 @@ export function updateStateFromNotification(state: MonitorState, n: Notification
 // Footer + status display
 // ---------------------------------------------------------------------------
 
+/**
+ * Map a workflow-run status/conclusion to a compact footer emoji.
+ *
+ * `in_progress` renders as 🏃 (not the literal API word), `queued` as ⏳, and a
+ * completed run gets an emoji per its conclusion (with 🏁 as the fallback for
+ * unknown conclusions). Returns "" when no status is known yet.
+ */
+export function runStatusEmoji(status?: string, conclusion?: string): string {
+	if (status === "completed") {
+		switch (conclusion) {
+			case "success":
+				return "✅";
+			case "failure":
+				return "❌";
+			case "startup_failure":
+				return "❌";
+			case "timed_out":
+				return "❌";
+			case "cancelled":
+				return "🚫";
+			case "skipped":
+				return "⏭️";
+			case "neutral":
+				return "➖";
+			default:
+				return "🏁";
+		}
+	}
+	if (status === "in_progress") return "🏃";
+	if (status === "queued") return "⏳";
+	return "";
+}
+
+/** OSC-8 hyperlink with a short display label (footer is always rendered as terminal Text). */
+function osc8Link(url: string, label: string): string {
+	return `\x1b]8;;${url}\x1b\\${label}\x1b]8;;\x1b\\`;
+}
+
 /** A minimal Notification shape — only the fields the state/footer need. */
 export interface Notification {
 	type: string;
@@ -206,9 +244,15 @@ export function formatFooterStatus(config: MonitorConfig, state: MonitorState | 
 				: `https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
 
 	if (config.resourceType === "run") {
-		if (!state || !state.runStatus) return `📡 ${url}`;
+		// Short label like PR footers (`owner/repo#42`), not the full URL — this
+		// footer line always passes through linkifyPRRefs(..., "osc8"), which
+		// protects already-linkified spans from double-wrapping.
+		const runUrl = `https://${config.host}/${config.owner}/${config.repo}/actions/runs/${config.runId}`;
+		const shortLink = osc8Link(runUrl, `${config.owner}/${config.repo} run #${config.runId}`);
+		if (!state || !state.runStatus) return `📡 ${shortLink}`;
+		const emoji = runStatusEmoji(state.runStatus, state.runConclusion);
 		const conclusion = state.runConclusion ? ` ${state.runConclusion}` : "";
-		return `📡 ${url} ${state.runStatus}${conclusion}`;
+		return `📡 ${shortLink} ${emoji}${conclusion}`;
 	}
 
 	if (!state) return `📡 ${url}`;
