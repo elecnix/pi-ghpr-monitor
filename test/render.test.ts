@@ -8,6 +8,7 @@ import {
 	updateStateFromNotification,
 	formatFooterStatus,
 	formatMonitorStatusLine,
+	runStatusEmoji,
 	type Notification,
 } from "../src/render";
 import type { MonitorConfig } from "../src/keys";
@@ -81,17 +82,56 @@ describe("formatFooterStatus", () => {
 		s.failingChecks = ["CI"];
 		expect(formatFooterStatus(cfg(), s)).toBe("📡 https://github.com/octo/demo/pull/42 ⚠️💬💭❌");
 	});
-	it("uses the run URL + status for run monitors", () => {
+	const runLink =
+		"\x1b]8;;https://github.com/octo/demo/actions/runs/9\x1b\\octo/demo run #9\x1b]8;;\x1b\\";
+	it("uses the short linked run label with a status emoji for run monitors", () => {
 		const s = emptyMonitorState();
 		s.runStatus = "in_progress";
 		expect(formatFooterStatus(cfg({ resourceType: "run", number: 0, runId: 9 }), s)).toBe(
-			"📡 https://github.com/octo/demo/actions/runs/9 in_progress",
+			`📡 ${runLink} 🏃`,
+		);
+	});
+	it("shows the queued emoji for queued runs", () => {
+		const s = emptyMonitorState();
+		s.runStatus = "queued";
+		expect(formatFooterStatus(cfg({ resourceType: "run", number: 0, runId: 9 }), s)).toBe(
+			`📡 ${runLink} ⏳`,
+		);
+	});
+	it("shows the conclusion emoji + word for completed runs", () => {
+		const s = emptyMonitorState();
+		s.runStatus = "completed";
+		s.runConclusion = "success";
+		expect(formatFooterStatus(cfg({ resourceType: "run", number: 0, runId: 9 }), s)).toBe(
+			`📡 ${runLink} ✅ success`,
+		);
+		s.runConclusion = "failure";
+		expect(formatFooterStatus(cfg({ resourceType: "run", number: 0, runId: 9 }), s)).toBe(
+			`📡 ${runLink} ❌ failure`,
 		);
 	});
 	it("uses the issue URL for issue monitors", () => {
 		expect(formatFooterStatus(cfg({ resourceType: "issue" }), null)).toBe(
 			"📡 https://github.com/octo/demo/issues/42",
 		);
+	});
+});
+
+describe("runStatusEmoji", () => {
+	it("maps statuses to emojis", () => {
+		expect(runStatusEmoji("queued")).toBe("⏳");
+		expect(runStatusEmoji("in_progress")).toBe("🏃");
+		expect(runStatusEmoji()).toBe("");
+	});
+	it("maps conclusions to emojis", () => {
+		expect(runStatusEmoji("completed", "success")).toBe("✅");
+		expect(runStatusEmoji("completed", "failure")).toBe("❌");
+		expect(runStatusEmoji("completed", "startup_failure")).toBe("❌");
+		expect(runStatusEmoji("completed", "timed_out")).toBe("❌");
+		expect(runStatusEmoji("completed", "cancelled")).toBe("🚫");
+		expect(runStatusEmoji("completed", "skipped")).toBe("⏭️");
+		expect(runStatusEmoji("completed", "neutral")).toBe("➖");
+		expect(runStatusEmoji("completed")).toBe("🏁");
 	});
 });
 
