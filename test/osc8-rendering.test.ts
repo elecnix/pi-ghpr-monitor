@@ -24,7 +24,8 @@
 import { describe, it, expect } from "vitest";
 import { Text, Markdown, getCapabilities, setCapabilities } from "@earendil-works/pi-tui";
 import { getMarkdownTheme, initTheme } from "@earendil-works/pi-coding-agent";
-import { linkifyPRRefs } from "../src/render";
+import { linkifyPRRefs, formatFooterStatus, emptyMonitorState } from "../src/render";
+import type { MonitorConfig } from "../src/keys";
 
 try {
 	initTheme("dark");
@@ -37,6 +38,8 @@ const COMMIT_URL = "commit/7250cb4accb6019d4354dbd65686e8bbd06c6da3";
 const PULL_URL = "pull/61";
 const SHORT_SHA = "7250cb4";
 const PR_REF = "v2nic/pi-ghpr-monitor#61";
+const RUN_URL = "actions/runs/99";
+const RUN_REF = "octo/demo run #99";
 
 const RAW = `📝 New commit https://github.com/v2nic/pi-ghpr-monitor/commit/7250cb4accb6019d4354dbd65686e8bbd06c6da3 pushed to v2nic/pi-ghpr-monitor#61.`;
 
@@ -52,6 +55,8 @@ function renderCounts(lines: string[]) {
 		// short SHA NOT followed by the rest of the full sha (i.e. standalone display)
 		shortSha: (joined.match(/7250cb4(?!accb)/g) || []).length,
 		prRef: countOccurrences(joined, PR_REF),
+		runUrl: countOccurrences(joined, RUN_URL),
+		runRef: countOccurrences(joined, RUN_REF),
 	};
 }
 
@@ -63,14 +68,14 @@ describe("OSC 8 rendering through real pi-tui components (no triplication)", () 
 			// markdown format must not contain raw OSC 8 escapes
 			expect(md).not.toContain("\x1b]8;;");
 			const counts = renderCounts(new Markdown(md, 0, 0, mdTheme).render(120));
-			expect(counts).toEqual({ commitUrl: 1, pullUrl: 1, shortSha: 1, prRef: 1 });
+			expect(counts).toEqual({ commitUrl: 1, pullUrl: 1, shortSha: 1, prRef: 1, runUrl: 0, runRef: 0 });
 		});
 
 		it(`Text component (CustomMessage/footer path) renders osc8-format links singly (hyperlinks=${hyperlinks})`, () => {
 			setCapabilities({ ...getCapabilities(), hyperlinks });
 			const osc = linkifyPRRefs(RAW, "github.com", "osc8");
 			const counts = renderCounts(new Text(osc, 0, 0).render(120));
-			expect(counts).toEqual({ commitUrl: 1, pullUrl: 1, shortSha: 1, prRef: 1 });
+			expect(counts).toEqual({ commitUrl: 1, pullUrl: 1, shortSha: 1, prRef: 1, runUrl: 0, runRef: 0 });
 		});
 	}
 
@@ -83,5 +88,55 @@ describe("OSC 8 rendering through real pi-tui components (no triplication)", () 
 		const osc = linkifyPRRefs(RAW, "github.com", "osc8");
 		const counts = renderCounts(new Markdown(osc, 0, 0, mdTheme).render(120));
 		expect(counts.commitUrl).toBeGreaterThan(1);
+	});
+});
+
+describe("Actions run URL linkification (footer path)", () => {
+	const RUN_RAW = `📡 https://github.com/octo/demo/actions/runs/99 🏃`;
+
+	it("formatFooterStatus returns a bare URL (no OSC-8 escape sequences)", () => {
+		const config: MonitorConfig = {
+			resourceType: "run", host: "github.com", owner: "octo", repo: "demo",
+			number: 0, runId: 99, mode: "all", intervalSec: 60, wakeOn: [], autoMerge: false,
+		};
+		const footer = formatFooterStatus(config, { ...emptyMonitorState(), runStatus: "in_progress" });
+		expect(footer).not.toContain("\x1b");
+		expect(footer).toBe("📡 https://github.com/octo/demo/actions/runs/99 🏃");
+	});
+
+	it("osc8 format wraps the run URL in a single OSC 8 hyperlink", () => {
+		setCapabilities({ ...getCapabilities(), hyperlinks: true });
+		const osc = linkifyPRRefs(RUN_RAW, "github.com", "osc8");
+		expect(osc).toContain("\x1b]8;;https://github.com/octo/demo/actions/runs/99\x1b\\octo/demo run #99\x1b]8;;\x1b\\");
+		expect(osc).toContain("🏃");
+		const counts = renderCounts(new Text(osc, 0, 0).render(120));
+		expect(counts.runUrl).toBe(1);
+		expect(counts.runRef).toBe(1);
+	});
+
+	it("markdown format wraps the run URL as a single markdown link", () => {
+		setCapabilities({ ...getCapabilities(), hyperlinks: true });
+		const md = linkifyPRRefs(RUN_RAW, "github.com", "markdown");
+		expect(md).not.toContain("\x1b]8;;");
+		expect(md).toContain("[octo/demo run #99](https://github.com/octo/demo/actions/runs/99)");
+		expect(md).toContain("🏃");
+		const counts = renderCounts(new Markdown(md, 0, 0, mdTheme).render(120));
+		expect(counts.runUrl).toBe(1);
+		expect(counts.runRef).toBe(1);
+	});
+
+	it("the run label columns are inside a single OSC-8 span (no leakage past the close)", () => {
+		setCapabilities({ ...getCapabilities(), hyperlinks: true });
+		const osc = linkifyPRRefs(RUN_RAW, "github.com", "osc8");
+		const lines = new Text(osc, 0, 0).render(120);
+		const line = lines[0];
+		// The link label appears exactly once and the closing OSC-8 precedes the 🏃
+		expect(line).toContain("octo/demo run #99");
+		expect(line.indexOf("🏃") > line.indexOf("\x1b]8;;\x1b\\")).toBe(true);
+		// Exactly one open and one close OSC-8 pair (no double-wrapping)
+		const osc8Markers = (line.match(/\x1b\]8;;/g) || []).length;
+		expect(osc8Markers).toBe(2); // one open, one close
+		const closes = (line.match(/\x1b\]8;;\x1b\\/g) || []).length;
+		expect(closes).toBe(1);
 	});
 });

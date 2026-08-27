@@ -82,20 +82,18 @@ describe("formatFooterStatus", () => {
 		s.failingChecks = ["CI"];
 		expect(formatFooterStatus(cfg(), s)).toBe("📡 https://github.com/octo/demo/pull/42 ⚠️💬💭❌");
 	});
-	const runLink =
-		"\x1b]8;;https://github.com/octo/demo/actions/runs/9\x1b\\octo/demo run #9\x1b]8;;\x1b\\";
-	it("uses the short linked run label with a status emoji for run monitors", () => {
+	it("uses the run URL with a status emoji for run monitors (linkified later by linkifyPRRefs)", () => {
 		const s = emptyMonitorState();
 		s.runStatus = "in_progress";
 		expect(formatFooterStatus(cfg({ resourceType: "run", number: 0, runId: 9 }), s)).toBe(
-			`📡 ${runLink} 🏃`,
+			"📡 https://github.com/octo/demo/actions/runs/9 🏃",
 		);
 	});
 	it("shows the queued emoji for queued runs", () => {
 		const s = emptyMonitorState();
 		s.runStatus = "queued";
 		expect(formatFooterStatus(cfg({ resourceType: "run", number: 0, runId: 9 }), s)).toBe(
-			`📡 ${runLink} ⏳`,
+			"📡 https://github.com/octo/demo/actions/runs/9 ⏳",
 		);
 	});
 	it("shows the conclusion emoji + word for completed runs", () => {
@@ -103,11 +101,11 @@ describe("formatFooterStatus", () => {
 		s.runStatus = "completed";
 		s.runConclusion = "success";
 		expect(formatFooterStatus(cfg({ resourceType: "run", number: 0, runId: 9 }), s)).toBe(
-			`📡 ${runLink} ✅ success`,
+			"📡 https://github.com/octo/demo/actions/runs/9 ✅ success",
 		);
 		s.runConclusion = "failure";
 		expect(formatFooterStatus(cfg({ resourceType: "run", number: 0, runId: 9 }), s)).toBe(
-			`📡 ${runLink} ❌ failure`,
+			"📡 https://github.com/octo/demo/actions/runs/9 ❌ failure",
 		);
 	});
 	it("uses the issue URL for issue monitors", () => {
