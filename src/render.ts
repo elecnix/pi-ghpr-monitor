@@ -62,6 +62,15 @@ export function linkifyPRRefs(
 
 	protectLinks();
 
+	const runUrlPattern = /https?:\/\/([^\/\s]+)\/([^\/\s]+)\/([^\/\s]+)\/actions\/runs\/([0-9]+)\b/g;
+	text = text.replace(runUrlPattern, (_match, host: string, owner: string, repo: string, runId: string) => {
+		const url = `https://${host}/${owner}/${repo}/actions/runs/${runId}`;
+		const label = `${owner}/${repo} run #${runId}`;
+		return link(url, label);
+	});
+
+	protectLinks();
+
 	const commitUrlPattern = /https?:\/\/([^\/\s]+)\/([^\/\s]+)\/([^\/\s]+)\/commit\/([0-9a-f]{7,40})\b/gi;
 	text = text.replace(commitUrlPattern, (_match, host: string, owner: string, repo: string, sha: string) => {
 		const url = `https://${host}/${owner}/${repo}/commit/${sha}`;
@@ -204,11 +213,6 @@ export function runStatusEmoji(status?: string, conclusion?: string): string {
 	return "";
 }
 
-/** OSC-8 hyperlink with a short display label (footer is always rendered as terminal Text). */
-function osc8Link(url: string, label: string): string {
-	return `\x1b]8;;${url}\x1b\\${label}\x1b]8;;\x1b\\`;
-}
-
 /** A minimal Notification shape — only the fields the state/footer need. */
 export interface Notification {
 	type: string;
@@ -244,15 +248,14 @@ export function formatFooterStatus(config: MonitorConfig, state: MonitorState | 
 				: `https://${config.host}/${config.owner}/${config.repo}/pull/${config.number}`;
 
 	if (config.resourceType === "run") {
-		// Short label like PR footers (`owner/repo#42`), not the full URL — this
-		// footer line always passes through linkifyPRRefs(..., "osc8"), which
-		// protects already-linkified spans from double-wrapping.
+		// Return the bare Actions run URL and let linkifyPRRefs build the
+		// hyperlink — the same layering as PR/issue footers, so the OSC-8 vs
+		// markdown rendering decision lives in one place.
 		const runUrl = `https://${config.host}/${config.owner}/${config.repo}/actions/runs/${config.runId}`;
-		const shortLink = osc8Link(runUrl, `${config.owner}/${config.repo} run #${config.runId}`);
-		if (!state || !state.runStatus) return `📡 ${shortLink}`;
+		if (!state || !state.runStatus) return `📡 ${runUrl}`;
 		const emoji = runStatusEmoji(state.runStatus, state.runConclusion);
 		const conclusion = state.runConclusion ? ` ${state.runConclusion}` : "";
-		return `📡 ${shortLink} ${emoji}${conclusion}`;
+		return `📡 ${runUrl} ${emoji}${conclusion}`;
 	}
 
 	if (!state) return `📡 ${url}`;
