@@ -43,8 +43,11 @@ jobs:
       - name: Build extension bundle
         run: npx esbuild src/index.ts --bundle --platform=node --target=node22 --outfile=dist/index.js --external:@mariozechner/pi-ai --external:@mariozechner/pi-tui --external:@mariozechner/pi-agent-core --external:@sinclair/typebox
 
+      # Skip the install when tmux is already in the runner image
+      # (ghcr.io/elecnix/actions-runner bakes it in; the stock
+      # actions-runner image does not, hence the check).
       - name: Install tmux
-        run: sudo apt-get update && sudo apt-get install -y tmux
+        run: command -v tmux >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y --no-install-recommends tmux; }
 
       - name: Run integration tests with tmux screenshots
         env:
