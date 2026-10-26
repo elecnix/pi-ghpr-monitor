@@ -183,7 +183,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	const nudgedPRKeys: Set<string> = new Set();
 	const nudgedIssueKeys: Set<string> = new Set();
 	let agentTurnActive = false;
-	let queuedUpdates: Array<{ concise: string; detailed: string; host: string; monitorKey: string; wake: boolean }> = [];
+	let queuedUpdates: Array<{ concise: string; detailed: string; host: string; monitorKey: string; wake: boolean; refKind: "pr" | "issue" }> = [];
 	let queuedPrCreateNudges: Array<{ message: string; host: string }> = [];
 	let queuedIssueCreateNudges: Array<{ message: string; host: string }> = [];
 	let uiCtx: ExtensionUIContext | undefined;
@@ -240,11 +240,12 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	 * While the agent is mid-turn, callers queue and flush at turn_end (see
 	 * deliver()). See render.ts/linkifyPRRefs for the format split.
 	 */
-	function sendPRNotification(concise: string, detailed: string, options?: { deliverAs?: "steer"; host?: string; displayOnly?: boolean; wake?: boolean }) {
+	function sendPRNotification(concise: string, detailed: string, options?: { deliverAs?: "steer"; host?: string; refKind?: "pr" | "issue"; displayOnly?: boolean; wake?: boolean }) {
 		const delivery = options?.deliverAs;
 		const linkifyHost = options?.host ?? "github.com";
-		const markdownDetailed = linkifyPRRefs(detailed, linkifyHost, "markdown");
-		const linkifiedConcise = linkifyPRRefs(concise, linkifyHost, "osc8");
+		const refKind = options?.refKind ?? "pr";
+		const markdownDetailed = linkifyPRRefs(detailed, linkifyHost, "markdown", refKind);
+		const linkifiedConcise = linkifyPRRefs(concise, linkifyHost, "osc8", refKind);
 
 		if (!options?.displayOnly && delivery) {
 			pi.sendUserMessage(markdownDetailed, { deliverAs: delivery });
@@ -271,7 +272,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		agentTurnActive = false;
 		if (queuedUpdates.length > 0) {
 			for (const u of queuedUpdates) {
-				sendPRNotification(u.concise, u.detailed, { host: u.host, wake: u.wake });
+				sendPRNotification(u.concise, u.detailed, { host: u.host, refKind: u.refKind, wake: u.wake });
 			}
 			queuedUpdates = [];
 		}
@@ -424,6 +425,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 
 		const config = mon.config;
 		const host = config.host;
+		const refKind = config.resourceType === "issue" ? "issue" : "pr";
 		const concise = n.message;
 		const detailed = n.detail ? `${n.message}\n\n${n.detail}` : n.message;
 		const wake = shouldWake(mon, n.type);
@@ -432,9 +434,9 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		if (n.type === "first-poll") {
 			pi.sendMessage({
 				customType: "ghpr-monitor",
-				content: linkifyPRRefs(detailed, host, "markdown"),
+				content: linkifyPRRefs(detailed, host, "markdown", refKind),
 				display: true,
-				details: { concise: linkifyPRRefs(concise, host, "osc8") },
+				details: { concise: linkifyPRRefs(concise, host, "osc8", refKind) },
 			});
 			return;
 		}
@@ -447,7 +449,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				getAdapterPref("ciGreenMerge", currentAdapterPrefs) as string,
 				vars,
 			);
-			deliver(concise, `${detailed}\n\n${mergeMsg}`, host, key, wake);
+			deliver(concise, `${detailed}\n\n${mergeMsg}`, host, key, wake, refKind);
 			mon.lastSentUpdate = concise;
 			mon.lastNudgeTime = Date.now();
 			return;
@@ -472,7 +474,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		// — when opted in — transition this monitor into deployment tracking
 		// instead of dying with gh monitor's auto-stop.
 		if (n.type === "merged") {
-			deliver(concise, detailed, host, key, wake);
+			deliver(concise, detailed, host, key, wake, refKind);
 			mon.lastSentUpdate = concise;
 			mon.lastNudgeTime = Date.now();
 			if (config.resourceType === "pr" && config.trackDeployments) {
@@ -481,7 +483,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			return;
 		}
 
-		deliver(concise, detailed, host, key, wake);
+		deliver(concise, detailed, host, key, wake, refKind);
 		mon.lastSentUpdate = concise;
 		mon.lastNudgeTime = Date.now();
 	}
@@ -518,18 +520,18 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			log(`Failure-log extraction error for ${key}: ${err instanceof Error ? err.message : String(err)}`);
 		}
 
-		deliver(concise, detailed, config.host, key, shouldWake(mon, n.type));
+		deliver(concise, detailed, config.host, key, shouldWake(mon, n.type), config.resourceType === "issue" ? "issue" : "pr");
 		mon.lastSentUpdate = concise;
 		mon.lastNudgeTime = Date.now();
 	}
 
 	/** Deliver now, or queue for turn_end if the agent is mid-turn. */
-	function deliver(concise: string, detailed: string, host: string, monitorKey: string, wake: boolean): void {
+	function deliver(concise: string, detailed: string, host: string, monitorKey: string, wake: boolean, refKind: "pr" | "issue" = "pr"): void {
 		if (agentTurnActive) {
-			queuedUpdates.push({ concise, detailed, host, monitorKey, wake });
+			queuedUpdates.push({ concise, detailed, host, monitorKey, wake, refKind });
 			return;
 		}
-		sendPRNotification(concise, detailed, { host, wake });
+		sendPRNotification(concise, detailed, { host, refKind, wake });
 	}
 
 	// -------------------------------------------------------------------
@@ -790,11 +792,12 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				if (mon && !mon.exited) updateStateFromNotification(mon.state, n);
 				const concise = n.message;
 				const detailed = n.detail ? `${n.message}\n\n${n.detail}` : n.message;
+				const refKind = config.resourceType === "issue" ? "issue" : "pr";
 				if (agentTurnActive) {
-					queuedUpdates.push({ concise, detailed, host: config.host, monitorKey: key, wake: true });
+					queuedUpdates.push({ concise, detailed, host: config.host, monitorKey: key, wake: true, refKind });
 				} else {
 					// User-initiated check: always wake the agent with the result.
-					sendPRNotification(concise, detailed, { host: config.host, wake: true });
+					sendPRNotification(concise, detailed, { host: config.host, refKind, wake: true });
 				}
 			}
 			if (mon) mon.lastNudgeTime = Date.now();
@@ -1055,7 +1058,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			"Use action='preferences' to view current preferences or update them with a value parameter.",
 			"The value parameter for preferences is a JSON string. gh-monitor-owned keys: templates (map of event-kind → template string|null), ignoredBots (array of strings), retriggerComments (boolean). Pi-specific keys: disableMergeTool (boolean), prCreateNudge (string), issueCreateNudge (string), ciGreenMerge (string). Set any key to null to reset it to default.",
 			"Event kinds for templates: new-unresolved-threads, new-general-comments, conflict, new-failing-checks, ci-all-green, review-approved, review-changes-requested, review-dismissed, new-commit, merged, closed, first-poll, all-clear, issue-closed, issue-reopened, issue-new-comment, issue-mention, run-queued, run-in-progress, run-completed.",
-			"Template variables: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, {unresolvedThreads}, {generalComments}, {failingChecks}, {conflict}, {commitOid}, {commitShortOid}, {commitUrl}, {commitAuthor}, {commitCoauthors}, {commitMessageHeadline}, {runId}, {runName}, {runNumber}, {runEvent}, {runStatus}, {runConclusion}, {runBranch}, {runUrl}.",
+			"Template variables: {owner}, {repo}, {number}, {host}, {prLabel}, {prUrl}, {unresolvedThreads}, {generalComments}, {failingChecks}, {conflict}, {commitOid}, {commitShortOid}, {commitUrl}, {commitAuthor}, {commitCoauthors}, {commitMessageHeadline}, {intervalSec}, {pollMode}, {runId}, {runName}, {runNumber}, {runEvent}, {runStatus}, {runConclusion}, {runBranch}, {runUrl}.",
 			"You may stop monitoring with action='stop', but treat stopping as an explicit last resort: only stop a monitor when it is known to be obsolete or redundant.",
 			"Monitoring runs until the user stops it via /ghpr-monitor off, the agent stops it via action='stop' (last resort only), or the PR is merged/closed (run until completed).",
 			"You will receive PR status updates as notifications.",

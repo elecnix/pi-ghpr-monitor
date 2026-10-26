@@ -8,6 +8,7 @@ import {
 	updateStateFromNotification,
 	formatFooterStatus,
 	formatMonitorStatusLine,
+	linkifyPRRefs,
 	runStatusEmoji,
 	type Notification,
 } from "../src/render";
@@ -150,5 +151,36 @@ describe("formatMonitorStatusLine", () => {
 	it("includes the auto-merge tag for PR monitors", () => {
 		const line = formatMonitorStatusLine(cfg({ autoMerge: true }), emptyMonitorState());
 		expect(line).toContain("🔀auto-merge");
+	});
+});
+describe("linkifyPRRefs ref kind (issue vs PR)", () => {
+	const ACK = "📡 Monitoring patty-io/pi-patty-bg-tasks#32 (polling every 60s)";
+
+	it("links a bare ref on a PR monitor to /pull/ (default)", () => {
+		expect(linkifyPRRefs(ACK, "github.com", "markdown")).toContain(
+			"[patty-io/pi-patty-bg-tasks#32](https://github.com/patty-io/pi-patty-bg-tasks/pull/32)",
+		);
+		expect(linkifyPRRefs(ACK, "github.com", "markdown", "pr")).toContain("/pull/32");
+	});
+
+	it("links a bare ref on an issue monitor to /issues/ (regression: ack pointed at /pull/)", () => {
+		const md = linkifyPRRefs(ACK, "github.com", "markdown", "issue");
+		expect(md).toContain(
+			"[patty-io/pi-patty-bg-tasks#32](https://github.com/patty-io/pi-patty-bg-tasks/issues/32)",
+		);
+		expect(md).not.toContain("/pull/");
+	});
+
+	it("uses the issue URL in the OSC-8 target for issue monitors", () => {
+		const osc = linkifyPRRefs(ACK, "github.com", "osc8", "issue");
+		expect(osc).toContain("\x1b]8;;https://github.com/patty-io/pi-patty-bg-tasks/issues/32\x1b\\patty-io/pi-patty-bg-tasks#32\x1b]8;;\x1b\\");
+		expect(osc).not.toContain("/pull/");
+	});
+
+	it("keeps a genuine PR URL a /pull/ link on an issue monitor", () => {
+		// refKind only governs bare owner/repo#n refs; an explicit full URL is
+		// whatever it says it is.
+		const md = linkifyPRRefs("see https://github.com/octo/demo/pull/7", "github.com", "markdown", "issue");
+		expect(md).toContain("[octo/demo#7](https://github.com/octo/demo/pull/7)");
 	});
 });
