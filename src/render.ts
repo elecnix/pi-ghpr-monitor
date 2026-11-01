@@ -27,11 +27,15 @@ import type { MonitorConfig } from "./keys";
  * @param defaultHost Host used to build URLs for bare owner/repo#number refs.
  * @param format     "osc8" for terminal Text rendering, "markdown" for the
  *                   UserMessage Markdown renderer.
+ * @param refKind    What a bare owner/repo#number ref points at: "pr" builds
+ *                   .../pull/<n>, "issue" builds .../issues/<n>. Issue
+ *                   monitors must not link their refs to a /pull/ URL.
  */
 export function linkifyPRRefs(
 	text: string,
 	defaultHost: string = "github.com",
 	format: "osc8" | "markdown" = "osc8",
+	refKind: "pr" | "issue" = "pr",
 ): string {
 	const link = (url: string, display: string): string =>
 		format === "markdown"
@@ -80,9 +84,10 @@ export function linkifyPRRefs(
 
 	protectLinks();
 
+	const refSegment = refKind === "issue" ? "issues" : "pull";
 	const refPattern = /([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)#([0-9]+)\b/g;
 	text = text.replace(refPattern, (_match, owner: string, repo: string, number: string) => {
-		const url = `https://${defaultHost}/${owner}/${repo}/pull/${number}`;
+		const url = `https://${defaultHost}/${owner}/${repo}/${refSegment}/${number}`;
 		return link(url, `${owner}/${repo}#${number}`);
 	});
 

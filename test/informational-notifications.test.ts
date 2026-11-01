@@ -77,7 +77,7 @@ describe("shouldWake decides per event kind", () => {
 		const end = src.indexOf("/** Deliver now", start);
 		const block = src.slice(start, end);
 		expect(block).toContain("shouldWake(mon, n.type)");
-		expect(block).toContain("deliver(concise, detailed, host, key, wake);");
+		expect(block).toContain("deliver(concise, detailed, host, key, wake, refKind);");
 	});
 });
 
@@ -101,8 +101,8 @@ describe("delivery paths", () => {
 		const start = src.indexOf("function deliver(");
 		const end = src.indexOf("function handleExit", start);
 		const block = src.slice(start, end);
-		expect(block).toContain("queuedUpdates.push({ concise, detailed, host, monitorKey, wake });");
-		expect(block).toContain("sendPRNotification(concise, detailed, { host, wake });");
+		expect(block).toContain("queuedUpdates.push({ concise, detailed, host, monitorKey, wake, refKind });");
+		expect(block).toContain("sendPRNotification(concise, detailed, { host, refKind, wake });");
 	});
 
 	it("turn_end flush preserves the wake flag", () => {
@@ -110,13 +110,13 @@ describe("delivery paths", () => {
 		const flushIdx = src.indexOf("queuedUpdates.length > 0", turnEndIdx);
 		const blockEnd = src.indexOf("queuedPrCreateNudges.length > 0", flushIdx);
 		const block = src.slice(flushIdx, blockEnd);
-		expect(block).toContain("sendPRNotification(u.concise, u.detailed, { host: u.host, wake: u.wake });");
+		expect(block).toContain("sendPRNotification(u.concise, u.detailed, { host: u.host, refKind: u.refKind, wake: u.wake });");
 	});
 
 	it("forceCheck results wake (user-initiated check)", () => {
 		const start = src.indexOf("async function forceCheck");
 		const block = src.slice(start, start + 3000);
-		expect(block).toContain("sendPRNotification(concise, detailed, { host: config.host, wake: true });");
+		expect(block).toContain("sendPRNotification(concise, detailed, { host: config.host, refKind, wake: true });");
 	});
 
 	it("first-poll remains TUI-only (no agent turn)", () => {
