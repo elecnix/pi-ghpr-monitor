@@ -21,10 +21,17 @@ Polling, snapshotting, change-diffing, and notification templating live in `gh m
 - `src/gh-monitor-bridge.ts` — Spawns `gh monitor`, parses the NDJSON event stream, and delegates prefs (`gh monitor prefs get/set/reset/path`). Free of pi-tui deps so it's unit-testable. `GH_MONITOR_BIN` overrides the binary (for tests/sandboxes).
 - `src/keys.ts` — URL/shorthand parsing (`parsePRUrl`/`parseIssueUrl`/`parseRunUrl`/`parsePRShorthand`), monitor keys (`prKey`/`runKey`/`monitorKey`), and the `MonitorConfig` type.
 - `src/render.ts` — pi-tui rendering: `linkifyPRRefs` (OSC-8/markdown hyperlinks), `MonitorState` (per-monitor summary folded from the event stream), and footer/status display.
+- `src/session-monitors.ts`: restart support. It defines the `ghpr-monitor-session` custom entries (`watch` and `unwatch`) that `index.ts` appends with `pi.appendEntry`, `restorableMonitors` (folds a session branch into the monitors to restart on `session_start`), and `instanceName` (the per-session `gh monitor --instance` name whose saved snapshot keeps a restarted monitor from repeating old events).
 - `src/adapter-prefs.ts` — Pi-specific prefs (`disableMergeTool`, `prCreateNudge`, `ciGreenMerge`) stored at `~/.config/pi-ghpr-monitor/adapter.json`; templates/ignoredBots/retriggerComments are owned by `gh monitor prefs`.
 - `src/pr-create-hook.ts` — Detects `gh pr create` and builds the nudge message.
 - `src/logger.ts` — Optional debug logging.
 - `test/` — Unit tests for the bridge, keys, render, adapter-prefs, pr-create-hook, logger, and white-box structural tests for the command/tool; `test/integration/` runs a tmux screenshot smoke test against a mock `gh monitor` binary.
+
+## Restart behaviour
+
+Pi kills every `gh monitor` child on `session_shutdown`, and the `gh monitor` daemon drops a poller when its last client leaves. Only the session file keeps a record across a restart. `startMonitor` and the auto-merge toggles append a `watch` entry. `forgetMonitor` appends an `unwatch` entry when a monitor ends without a restart pending, which covers explicit stops, merges and closes, completed runs, finished deployment tracking, and `gh monitor` errors. `session_shutdown` calls `teardownMonitors`, which kills the children and appends nothing. On `session_start` the extension restarts the monitors whose last entry is `watch`. A hard kill skips `session_shutdown` and ends in the same state as a clean quit: the `watch` entry is still the last one, so the next `session_start` restarts the monitor.
+
+Each child runs with `--instance pi-ghpr-<session id>-<key>`. `gh monitor` saves its delivered snapshot under that name and diffs against it on the next run, so a restarted monitor emits only changes made while Pi was down, without a `first-poll`. `forgetMonitor` deletes the saved snapshot with `gh monitor instances reset`.
 
 ## Dev Setup
 

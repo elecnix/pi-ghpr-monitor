@@ -25,6 +25,9 @@
  * Registers:
  *   /ghpr-monitor [!|start|on|off|status|check|merge|owner/repo#number|<URL>] — user command
  *   ghpr-monitor — LLM-callable tool
+ *
+ * Monitors come back after a Pi restart: each one is recorded in the session
+ * (session-monitors.ts) and re-armed on session_start.
  */
 
 import type { ExtensionAPI, ExtensionUIContext, MessageRenderer } from "@mariozechner/pi-coding-agent";
@@ -60,6 +63,7 @@ import {
 	type MonitorHandle,
 	spawnMonitor,
 	spawnOnce,
+	resetInstance,
 	prefsGet,
 	prefsSet,
 	prefsReset,
@@ -76,6 +80,15 @@ import {
 	DEFAULT_DISABLE_MERGE_TOOL,
 } from "./adapter-prefs";
 import { setSessionId, enableDebug, disableDebug, isDebugEnabled, closeLogger, log, getLogPath } from "./logger";
+import {
+	type MonitorEntryData,
+	type PersistedDeployState,
+	type SessionEntryLike,
+	type UnwatchReason,
+	MONITOR_ENTRY_TYPE,
+	restorableMonitors,
+	instanceName,
+} from "./session-monitors";
 import { isPRCreateCommand, parsePRUrlsFromOutput, createPRCreateNudge } from "./pr-create-hook";
 import { isIssueCreateCommand, parseIssueUrlsFromOutput, createIssueCreateNudge } from "./issue-create-hook";
 import { type FailureLogInfo, headCommitOid, fetchFailureLogsForCommit, formatFailureLogBlock } from "./failure-logs";
@@ -187,6 +200,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	let queuedPrCreateNudges: Array<{ message: string; host: string }> = [];
 	let queuedIssueCreateNudges: Array<{ message: string; host: string }> = [];
 	let uiCtx: ExtensionUIContext | undefined;
+	/** Pi session id, set on session_start. Scopes `gh monitor --instance` names. */
+	let sessionId: string | null = null;
 
 	// For testing: allow pointing the bridge at a mock binary / reducing interval.
 	// (GH_MONITOR_BIN is read directly by the bridge; no env wiring needed here.)
@@ -213,11 +228,17 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		return { systemPrompt: event.systemPrompt + "\n\n" + STEERING_PROMPT };
 	});
 
-	// Store session ID for debug logging (activated on demand via /ghpr-monitor debug).
+	// Store the session ID (debug logging, instance names), then re-arm the
+	// monitors this session recorded. Runs on startup, /reload, /resume and
+	// fork alike: every one of them begins with an empty monitor map.
 	pi.on("session_start", async (_event, ctx) => {
 		const sessionFile = ctx.sessionManager.getSessionFile();
 		const id = sessionFile ? path.basename(sessionFile, path.extname(sessionFile)) : `ephemeral-${Date.now()}`;
 		setSessionId(id);
+		sessionId = ctx.sessionManager.getSessionId?.() || id;
+		if (ctx.ui) uiCtx = ctx.ui;
+		const resumed = resumeMonitors(ctx.sessionManager.getBranch() as SessionEntryLike[]);
+		if (resumed.length > 0) announceResumed(resumed);
 	});
 
 	/**
@@ -292,9 +313,11 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		updateFooter();
 	});
 
+	// Shutdown ends the gh monitor children but records nothing: the
+	// session's watch entries stay live so the next session_start re-arms them.
 	pi.on("session_shutdown", async () => {
 		log("Session shutdown event received");
-		stopAllMonitors();
+		teardownMonitors();
 		closeLogger();
 	});
 
@@ -356,7 +379,71 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	// Monitor lifecycle
 	// -----------------------------------------------------------------------
 
-	function startMonitor(config: MonitorConfig): { key: string; message: string; alreadyMonitoring?: boolean } {
+	// -----------------------------------------------------------------------
+	// Session persistence (session-monitors.ts)
+	// -----------------------------------------------------------------------
+
+	function persist(data: MonitorEntryData): void {
+		try {
+			pi.appendEntry(MONITOR_ENTRY_TYPE, data);
+		} catch (err) {
+			log(`Could not record ${data.op} for ${data.key}: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	}
+
+	/** Record a monitor's current config (and deployment state) as live. */
+	function persistWatch(key: string, mon: ActiveMonitor): void {
+		const dt = mon.deployTracking;
+		const deploy: PersistedDeployState | undefined = dt && dt.sha ? { sha: dt.sha, snapshots: dt.lastSnapshots } : undefined;
+		persist({ op: "watch", key, config: mon.config, ...(deploy ? { deploy } : {}) });
+	}
+
+	function monitorInstance(key: string): string | undefined {
+		return sessionId ? instanceName(sessionId, key) : undefined;
+	}
+
+	/**
+	 * Remove a monitor for good: drop it from the map, record that it must not
+	 * be re-armed, and delete its stored gh monitor snapshot.
+	 */
+	function forgetMonitor(key: string, mon: ActiveMonitor, reason: UnwatchReason): void {
+		if (monitors.get(key) !== mon) return;
+		monitors.delete(key);
+		persist({ op: "unwatch", key, reason });
+		const instance = monitorInstance(key);
+		if (instance) resetInstance(instance);
+		updateFooter();
+	}
+
+	/**
+	 * Start every monitor the session branch records as live and that is not
+	 * already running. Returns the keys it started.
+	 */
+	function resumeMonitors(entries: readonly SessionEntryLike[]): string[] {
+		const resumed: string[] = [];
+		for (const r of restorableMonitors(entries)) {
+			const key = monitorKey(r.config);
+			if (monitors.has(key)) continue;
+			if (r.deploy) resumeDeployTracking(key, r.config, r.deploy);
+			else startMonitor(r.config, { restore: true });
+			resumed.push(key);
+		}
+		if (resumed.length > 0) log(`Resumed monitors: ${resumed.join(", ")}`);
+		return resumed;
+	}
+
+	/** Tell the TUI and the agent which monitors came back. Never starts a turn. */
+	function announceResumed(keys: string[]): void {
+		const urls = keys.map((k) => {
+			const mon = monitors.get(k);
+			return mon ? resourceUrl(mon.config) : k;
+		});
+		const concise = `🔁 Resumed monitoring ${keys.length} resource(s): ${keys.join(", ")}`;
+		const detailed = `${concise}\n\n${urls.join("\n")}\n\nThese monitors were running when the session last stopped. Changes made while Pi was not running arrive as new events; events already reported are not repeated.`;
+		pi.sendMessage({ customType: "ghpr-monitor", content: detailed, display: true, details: { concise } });
+	}
+
+	function startMonitor(config: MonitorConfig, opts: { restore?: boolean } = {}): { key: string; message: string; alreadyMonitoring?: boolean } {
 		const key = monitorKey(config);
 		log(`Starting monitor: ${key} (interval: ${config.intervalSec}s, type: ${config.resourceType})`);
 
@@ -368,10 +455,12 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		monitors.set(key, mon);
 		updateFooter();
 
+		if (!opts.restore) persistWatch(key, mon);
+
 		mon.handle = spawnMonitor(config, {
 			onNotification: (n) => handleNotification(key, mon, n),
 			onExit: (code, stderr) => handleExit(key, mon, code, stderr),
-		});
+		}, { instance: monitorInstance(key) });
 
 		return { key, message: `Started monitoring ${resourceUrl(config)} (interval: ${config.intervalSec}s)` };
 	}
@@ -569,6 +658,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				return;
 			}
 			dt.sha = sha;
+			persistWatch(key, mon);
 			log(`Deploy tracking: watching deployments on ${sha} for ${key}`);
 			const msg = `🔀 ${prLabel} was merged. Watching deployments on ${sha.slice(0, 7)}...`;
 			deliver(msg, msg, config.host, key, shouldWake(mon, "deployment-status"));
@@ -616,6 +706,8 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			mon.lastNudgeTime = Date.now();
 		}
 		dt.lastSnapshots = snapshots;
+		// Record the delivered deployment states so a restart diffs from them.
+		if (update) persistWatch(key, mon);
 
 		if (snapshots.length === 0) {
 			dt.emptyPolls++;
@@ -644,6 +736,28 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		dt.timer = timer;
 	}
 
+	/**
+	 * Resume deployment tracking recorded in the session (#85). gh monitor
+	 * already stopped on the merge, so no child process is started: the
+	 * adapter polls deployments on the recorded SHA and diffs against the
+	 * recorded snapshots.
+	 */
+	function resumeDeployTracking(key: string, config: MonitorConfig, deploy: PersistedDeployState): void {
+		const mon = createActiveMonitor(config);
+		mon.exited = true;
+		mon.deployTracking = {
+			sha: deploy.sha,
+			timer: null,
+			lastSnapshots: deploy.snapshots,
+			emptyPolls: 0,
+			errorCount: 0,
+			stopped: false,
+		};
+		monitors.set(key, mon);
+		updateFooter();
+		void pollDeploymentsOnce(key, mon);
+	}
+
 	/** End deployment tracking: clear the timer, notify, and remove the monitor. */
 	function finishDeployTracking(key: string, mon: ActiveMonitor, finalMsg: string | null): void {
 		const dt = mon.deployTracking;
@@ -657,8 +771,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			deliver(finalMsg, finalMsg, mon.config.host, key, true);
 		}
 		log(`Deploy tracking finished for ${key}${finalMsg ? ": notified" : ""}`);
-		monitors.delete(key);
-		updateFooter();
+		forgetMonitor(key, mon, "finished");
 	}
 
 	function handleExit(key: string, mon: ActiveMonitor, code: number | null, stderr: string): void {
@@ -683,36 +796,46 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			updateFooter();
 			return;
 		}
-		monitors.delete(key);
-		updateFooter();
+		forgetMonitor(key, mon, code !== null && code !== 0 ? "error" : "finished");
 	}
 
 	function stopMonitorByKey(key: string): string {
 		log(`Stopping monitor: ${key}`);
 		const mon = monitors.get(key);
 		if (!mon) return `Not monitoring ${key}`;
+		haltMonitor(mon);
+		forgetMonitor(key, mon, "stopped");
+		return `Stopped monitoring ${resourceUrl(mon.config)}`;
+	}
+
+	/** Explicit stop of every monitor (user or agent): none is re-armed. */
+	function stopAllMonitors(): string {
+		log("Stopping all monitors");
+		if (monitors.size === 0) return "No monitors running";
+		const entries = [...monitors.entries()];
+		for (const [key, mon] of entries) {
+			haltMonitor(mon);
+			forgetMonitor(key, mon, "stopped");
+		}
+		return `Stopped monitoring ${entries.length} resource(s): ${entries.map(([k]) => k).join(", ")}`;
+	}
+
+	/**
+	 * Session shutdown: end every gh monitor child and deployment poll, but
+	 * leave the session entries as they are so session_start re-arms them.
+	 */
+	function teardownMonitors(): void {
+		for (const mon of monitors.values()) haltMonitor(mon);
+		monitors.clear();
+		updateFooter();
+	}
+
+	/** Kill the gh monitor child and any deployment poll of a monitor. */
+	function haltMonitor(mon: ActiveMonitor): void {
 		mon.exited = true;
 		mon.handle?.abort();
 		mon.handle = null;
 		cancelDeployTracking(mon);
-		monitors.delete(key);
-		updateFooter();
-		return `Stopped monitoring ${resourceUrl(mon.config)}`;
-	}
-
-	function stopAllMonitors(): string {
-		log("Stopping all monitors");
-		if (monitors.size === 0) return "No monitors running";
-		const keys = [...monitors.keys()];
-		for (const [, mon] of monitors) {
-			mon.exited = true;
-			mon.handle?.abort();
-			mon.handle = null;
-			cancelDeployTracking(mon);
-		}
-		monitors.clear();
-		updateFooter();
-		return `Stopped monitoring ${keys.length} resource(s): ${keys.join(", ")}`;
 	}
 
 	/** Cancel any active deployment tracking (#85): clear its timer. */
@@ -836,7 +959,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	// -----------------------------------------------------------------------
 
 	pi.registerCommand("ghpr-monitor", {
-		description: "Monitor PRs: /ghpr-monitor ! | start — /ghpr-monitor [PR URL] — /ghpr-monitor status — /ghpr-monitor check [PR] — /ghpr-monitor off [PR] — leave blank to show status/usage",
+		description: "Monitor PRs: /ghpr-monitor ! | start — /ghpr-monitor [PR URL] — /ghpr-monitor status — /ghpr-monitor on (resume this session's recorded monitors) — /ghpr-monitor check [PR] — /ghpr-monitor off [PR] — leave blank to show status/usage",
 		getArgumentCompletions: (prefix: string) => {
 			const completions = ["!", "start", "on", "off", "stop", "check", "status", "merge", "preferences", "debug", "https://github.com"];
 			for (const key of monitors.keys()) completions.push(key);
@@ -905,12 +1028,22 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 				const mon = target ? monitors.get(target) : undefined;
 				if (!mon) { ctx.ui.notify(`Not monitoring ${target}.`, "warning"); return; }
 				mon.config.autoMerge = !mon.config.autoMerge;
+				persistWatch(target!, mon);
 				ctx.ui.notify(`Auto-merge ${mon.config.autoMerge ? "enabled" : "disabled"} for ${target}.${mon.config.autoMerge ? " The monitor will notify to merge when CI passes." : ""}`, "info");
 				return;
 			}
 
 			if (raw.toLowerCase() === "on" || raw === "") {
 				if (monitors.size > 0) { ctx.ui.notify(formatCurrentStatus(), "info"); return; }
+				// "on" re-arms the monitors this session recorded as live (the
+				// same set session_start re-arms), then reports what it started.
+				if (raw !== "") {
+					const resumed = resumeMonitors(ctx.sessionManager.getBranch() as SessionEntryLike[]);
+					if (resumed.length > 0) {
+						ctx.ui.notify(`Resumed monitoring ${resumed.length} resource(s): ${resumed.join(", ")}`, "info");
+						return;
+					}
+				}
 				ctx.ui.notify("No PR monitors running.\n  Start one with: /ghpr-monitor ! (current branch) or /ghpr-monitor <PR URL>", "info");
 				return;
 			}
@@ -970,7 +1103,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			}
 
 			ctx.ui.notify(
-				"Usage:\n  /ghpr-monitor ! | start — monitor current branch's PR (injects prompt for LLM)\n  /ghpr-monitor <PR URL> — paste a GH PR URL (TUI-only, no LLM turn)\n  /ghpr-monitor owner/repo#123\n  /ghpr-monitor owner/repo <pr-number> [message]\n  /ghpr-monitor <Actions run URL> — watch a single workflow run until it completes\n  /ghpr-monitor check [PR] — check now (all or specific)\n  /ghpr-monitor merge [PR] — toggle auto-merge when CI passes\n  /ghpr-monitor off [PR] — stop monitoring (all or specific)",
+				"Usage:\n  /ghpr-monitor ! | start — monitor current branch's PR (injects prompt for LLM)\n  /ghpr-monitor <PR URL> — paste a GH PR URL (TUI-only, no LLM turn)\n  /ghpr-monitor owner/repo#123\n  /ghpr-monitor owner/repo <pr-number> [message]\n  /ghpr-monitor <Actions run URL> — watch a single workflow run until it completes\n  /ghpr-monitor check [PR] — check now (all or specific)\n  /ghpr-monitor merge [PR] — toggle auto-merge when CI passes\n  /ghpr-monitor on — resume the monitors this session recorded, when none is running\n  /ghpr-monitor off [PR] — stop monitoring (all or specific)",
 				"info",
 			);
 		},
@@ -1175,6 +1308,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 					const mon = monitors.get(key);
 					if (!mon) return { content: [{ type: "text", text: `Not monitoring ${key}. Currently monitoring: ${[...monitors.keys()].join(", ")}` }], details: { action: "merge", status: "not_found" } };
 					mon.config.autoMerge = !mon.config.autoMerge;
+					persistWatch(key, mon);
 					const msg = mon.config.autoMerge ? `Auto-merge enabled for ${key}. The monitor will notify you to merge when CI passes.` : `Auto-merge disabled for ${key}.`;
 					return { content: [{ type: "text", text: msg }], details: { action: "merge", status: "toggled", autoMerge: mon.config.autoMerge, config: mon.config } };
 				}
