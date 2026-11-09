@@ -67,7 +67,7 @@ function spawnEnv(config: MonitorConfig): NodeJS.ProcessEnv {
  * `monitor` subcommand. PRs use a positional selector; issues use `--issue`;
  * runs use `--run-id`.
  */
-export function buildMonitorArgs(config: MonitorConfig, opts: { once?: boolean } = {}): string[] {
+export function buildMonitorArgs(config: MonitorConfig, opts: { once?: boolean; instance?: string } = {}): string[] {
 	const interval = Math.max(10, config.intervalSec || 60);
 	const args = ["-R", `${config.owner}/${config.repo}`, "--interval", String(interval)];
 
@@ -80,6 +80,11 @@ export function buildMonitorArgs(config: MonitorConfig, opts: { once?: boolean }
 	}
 
 	if (opts.once) args.push("--once");
+	// Named instance: `gh monitor` stores the last snapshot it delivered under
+	// this name and, on the next run with the same name, diffs against it
+	// instead of an empty baseline. A restarted monitor then emits only what
+	// changed while it was down, with no first-poll and no replay.
+	if (opts.instance) args.push("--instance", opts.instance);
 	// Per-event-kind allowlist: forward to `gh monitor --events` so the CLI
 	// suppresses unlisted kinds before they reach the adapter. The CLI
 	// validates the kinds and rejects unknown ones.
@@ -128,8 +133,8 @@ export interface MonitorHandle {
  * Notification. The process runs until gh-monitor auto-stops (PR merged/closed,
  * run completed) or `abort()` kills it.
  */
-export function spawnMonitor(config: MonitorConfig, handlers: MonitorHandlers): MonitorHandle {
-	const args = fullArgs(buildMonitorArgs(config));
+export function spawnMonitor(config: MonitorConfig, handlers: MonitorHandlers, opts: { instance?: string } = {}): MonitorHandle {
+	const args = fullArgs(buildMonitorArgs(config, { instance: opts.instance }));
 	const child = spawn(bin(), args, {
 		stdio: ["ignore", "pipe", "pipe"],
 		env: spawnEnv(config),
@@ -228,6 +233,21 @@ export async function spawnOnce(config: MonitorConfig): Promise<Notification[]> 
 			resolve(events);
 		});
 	});
+}
+
+/**
+ * Delete the stored snapshot of a named instance (`gh monitor instances reset
+ * <name>`), once the monitor that used it has ended for good. Best-effort: a
+ * failure leaves one small cursor file behind and is otherwise harmless.
+ */
+export function resetInstance(name: string): void {
+	try {
+		const child = spawn(bin(), fullArgs(["instances", "reset", name]), { stdio: "ignore" });
+		child.on("error", () => { /* best-effort */ });
+		child.unref();
+	} catch {
+		/* best-effort */
+	}
 }
 
 // ---------------------------------------------------------------------------

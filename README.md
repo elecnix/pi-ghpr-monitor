@@ -79,6 +79,26 @@ When the PR is merged or closed, the extension sends a final notification and st
 
 The LLM tool exposes `start`, `status`, `check`, `merge`, `preferences` — and `stop`. Stopping is an **explicit, last-resort operation**: the agent should only use `action='stop'` when a monitor is known to be obsolete or redundant (e.g. the same PR is already monitored elsewhere, or the task that needed it is done). Monitors otherwise run until the PR is merged/closed (or a watched run completes), or until the user stops them with `/ghpr-monitor off`. This keeps the agent watching for review comments even when CI is green.
 
+### Monitors after a Pi restart
+
+Monitors come back when Pi resumes the session. Each time a monitor starts, or you toggle its auto-merge, the extension appends a custom entry to the Pi session file (`pi.appendEntry`). Pi stores these entries but never sends them to the LLM. The extension appends a second entry, which marks the monitor as stopped, when the monitor ends without a restart pending. The triggers are an explicit stop by you or the agent, the end of the watched PR or run (merge, close, or run completion), and a `gh monitor` error.
+
+On `session_start` the extension reads the current branch of the session and starts every monitor whose last entry still marks it live. This covers quitting and resuming with `pi --resume`, `/resume`, `/reload`, and a hard kill. A hard kill never runs `session_shutdown`, so the session file still lists the monitor as live and the next start brings it back. The extension skips monitors that are already running, and it leaves stopped ones stopped. When it restarts monitors, it adds one informational message that lists them, and that message never starts a turn.
+
+Each monitor runs `gh monitor --instance <name>`, with a name built from the session id and the PR. `gh monitor` saves the last snapshot it delivered under that name. A restarted monitor diffs the current PR against that snapshot instead of an empty one, so it doesn't emit `first-poll` or repeat a comment, thread or CI result the session already saw. You get only what changed while Pi was not running, such as a new review or a failed check. If the PR merged while Pi was down, the monitor emits one `merged` event and stops. That event wakes the agent when the monitor's `wakeOn` lists `merged`. Once a monitor has ended, the extension deletes its saved snapshot with `gh monitor instances reset`.
+
+Post-merge deployment tracking resumes from the session entry too, which records the merged commit and the last deployment states delivered.
+
+A restarted monitor starts from an empty snapshot, as a new monitor does, in these cases:
+
+- a forked session, which has a new session id and so new instance names,
+- a monitor killed before its first poll completed, which has no saved snapshot yet,
+- a session without a session file (`--no-session`), whose entries Pi discards on exit.
+
+`gh monitor` then reports the PR's current state again, including open threads and failing checks.
+
+`/ghpr-monitor on` runs the same restart by hand. When no monitor is running, it starts the monitors that the session lists as live and reports which ones it started.
+
 ## Installation
 
 ```bash
@@ -103,7 +123,7 @@ Or add to your project's `.pi/settings.json`:
 /ghpr-monitor owner/repo 42                                                 Start monitoring PR #42
 /ghpr-monitor owner/repo 42 Review all open threads                          Start with a message
 /ghpr-monitor https://github.com/owner/repo/actions/runs/30433642            Watch a single workflow run until it completes
-/ghpr-monitor on                                                            Resume monitoring
+/ghpr-monitor on                                                            Restart this session's recorded monitors when none is running
 /ghpr-monitor off                                                           Stop monitoring
 ```
 

@@ -20,6 +20,7 @@ import {
 	prefsSet,
 	prefsReset,
 	prefsPath,
+	resetInstance,
 	type Notification,
 } from "../src/gh-monitor-bridge";
 import type { MonitorConfig } from "../src/keys";
@@ -79,6 +80,12 @@ describe("buildMonitorArgs", () => {
 		]);
 	});
 
+	it("appends --instance for a named, resumable monitor", () => {
+		expect(buildMonitorArgs(prConfig(), { instance: "pi-ghpr-s1-octo_demo_42" })).toEqual([
+			"-R", "octo/demo", "--interval", "60", "42", "--instance", "pi-ghpr-s1-octo_demo_42",
+		]);
+	});
+
 	it("enforces a minimum interval of 10s", () => {
 		const args = buildMonitorArgs(prConfig({ intervalSec: 3 }));
 		expect(args[args.indexOf("--interval") + 1]).toBe("10");
@@ -134,6 +141,16 @@ describe("spawnMonitor", () => {
 			});
 		});
 		expect(got.map((n) => n.type)).toEqual(["first-poll", "new-unresolved-threads"]);
+	});
+
+	it("passes the instance name to gh monitor", async () => {
+		const bin = mockBinary(`console.log(JSON.stringify({type:"first-poll",message:process.argv.slice(2).join(" "),pr_label:"octo/demo#42"}));`);
+		process.env.GH_MONITOR_BIN = bin;
+		const got: Notification[] = [];
+		await new Promise<void>((resolve) => {
+			spawnMonitor(prConfig(), { onNotification: (n) => got.push(n), onExit: () => resolve() }, { instance: "pi-ghpr-s1-x" });
+		});
+		expect(got[0]!.message).toContain("--instance pi-ghpr-s1-x");
 	});
 
 	it("calls onExit with code 0 on clean exit (auto-stop)", async () => {
@@ -223,5 +240,22 @@ describe("prefs shell-out", () => {
 		process.env.GH_MONITOR_BIN = bin;
 		const p = await prefsReset();
 		expect(p.retriggerComments).toBe(false);
+	});
+});
+describe("resetInstance", () => {
+	afterEach(restoreEnv);
+
+	it("runs `instances reset <name>`", async () => {
+		const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ghmock-out-")), "argv");
+		const bin = mockBinary(`require("fs").writeFileSync(${JSON.stringify(out)}, process.argv.slice(2).join(" "));`);
+		process.env.GH_MONITOR_BIN = bin;
+		resetInstance("pi-ghpr-s1-x");
+		for (let i = 0; i < 50 && !fs.existsSync(out); i++) await new Promise((r) => setTimeout(r, 20));
+		expect(fs.readFileSync(out, "utf-8")).toBe("instances reset pi-ghpr-s1-x");
+	});
+
+	it("does not throw when the binary is missing", () => {
+		process.env.GH_MONITOR_BIN = "/nonexistent/gh-monitor";
+		expect(() => resetInstance("x")).not.toThrow();
 	});
 });
