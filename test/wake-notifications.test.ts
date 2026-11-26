@@ -6,15 +6,16 @@
  * agent, so sessions sat idle through failing CI and merged PRs. Reverting
  * wholesale (everything steers) would bring back the noise #106 fixed.
  *
- * The design landed on here: notifications stay informational BY DEFAULT,
- * and each monitor takes a `wakeOn` list of event kinds (or ["*"]) whose
- * events wake the agent via pi.sendMessage(..., { deliverAs: "followUp",
- * triggerTurn: true }) — a single custom message that starts a turn when
- * the agent is idle and never interrupts mid-turn work. first-poll never
- * wakes (it is the initial state snapshot, not a change). Degraded-API
- * diagnostics keep their per-episode dedup and only wake when explicitly
- * listed. The deliberate PR/issue create-hook nudges keep their steer
- * delivery.
+ * The design landed here, and then inverted: notifications wake the agent BY
+ * DEFAULT, and a monitor opts out with an explicitly empty `wakeOn` list. A
+ * wake is one pi.sendMessage(..., { deliverAs: "followUp", triggerTurn: true })
+ * — a single custom message that starts a turn when the agent is idle and
+ * never interrupts mid-turn work — so the default costs a turn, never an
+ * interruption. first-poll never wakes: it is the initial state snapshot, not
+ * a change. A non-empty `wakeOn` narrows waking to the kinds it names, and "*"
+ * names every kind. Degraded-API diagnostics keep their per-episode dedup, so
+ * a rate-limit outage wakes at most once per episode. The deliberate PR/issue
+ * create-hook nudges keep their steer delivery.
  */
 
 import { describe, it, expect } from "vitest";
@@ -57,9 +58,14 @@ describe("wakeOn configuration", () => {
 });
 
 describe("shouldWake decides per event kind", () => {
-	it("is false without wakeOn (informational default)", () => {
+	it("is true without wakeOn (waking is the default)", () => {
 		const block = shouldWakeBlock();
-		expect(block).toContain("if (!wakeOn || wakeOn.length === 0) return false;");
+		expect(block).toContain("if (!wakeOn) return true;");
+	});
+
+	it("is false with an explicitly empty wakeOn (the opt-out)", () => {
+		const block = shouldWakeBlock();
+		expect(block).toContain("if (wakeOn.length === 0) return false;");
 	});
 
 	it("never wakes on first-poll (initial snapshot, not a change)", () => {
@@ -81,6 +87,25 @@ describe("shouldWake decides per event kind", () => {
 	});
 });
 
+describe("every surface a reader meets states the default", () => {
+	it("the steering prompt says a notification starts a turn by default", () => {
+		expect(src).toContain("Notifications start a turn by default");
+	});
+
+	it("the wakeOn parameter says omitting it wakes on every event", () => {
+		expect(src).toContain("Omit to wake on every event");
+	});
+
+	it("the prompt guidelines name the opt-out", () => {
+		expect(src).toContain("wakeOn=[]");
+	});
+
+	it("MonitorConfig documents the same default", () => {
+		const keysSrc = fs.readFileSync(path.join(__dirname, "..", "src", "keys.ts"), "utf-8");
+		expect(keysSrc).toContain("Omit to wake on every event");
+	});
+});
+
 describe("delivery paths", () => {
 	it("wake delivery is a single custom message with followUp + triggerTurn (never interrupts)", () => {
 		const block = sendPRNotificationBlock();
@@ -91,7 +116,7 @@ describe("delivery paths", () => {
 		expect(block).toContain("if (!options?.displayOnly && delivery)");
 	});
 
-	it("default delivery is informational (plain custom message, display true)", () => {
+	it("the opt-out path is informational (plain custom message, display true)", () => {
 		const block = sendPRNotificationBlock();
 		expect(block).toContain('customType: "ghpr-monitor"');
 		expect(block).toContain("display: !delivery || options?.displayOnly ? true : false");
