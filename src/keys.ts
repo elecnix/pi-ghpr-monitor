@@ -39,10 +39,10 @@ export interface MonitorConfig {
 	 *  case-insensitive; unknown kinds are rejected by `gh monitor`. */
 	events?: string[];
 	/** Event kinds whose notifications wake the agent (start a turn), e.g.
-	 *  ["new-failing-checks", "merged"]. "*" wakes on every event except
-	 *  "first-poll". Omit for informational-only notifications (the agent
-	 *  sees them on its next turn without being woken). Matching is
-	 *  case-insensitive. */
+	 *  ["new-failing-checks", "merged"]. Omit to wake on every event, which is
+	 *  the default; pass an explicitly empty list to opt out of waking, so the
+	 *  agent reads those notifications on its next turn instead. "*" names
+	 *  every event. "first-poll" never wakes. Matching is case-insensitive. */
 	wakeOn?: string[];
 	/** Opt-in (#85): after the PR merges, keep polling deployment statuses on
 	 *  the merged head commit until they reach a terminal state. */

@@ -211,7 +211,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	let currentAdapterPrefs: AdapterPrefs = loadAdapterPrefs();
 	log(`Loaded adapter prefs: ${JSON.stringify(currentAdapterPrefs)}`);
 
-	const STEERING_PROMPT = `You have access to the ghpr-monitor tool. When the user asks you to watch or monitor a PR, use ghpr-monitor with action "start" to begin monitoring. The tool has actions: start, status, check, merge, stop, and preferences. Multiple PRs/runs can be monitored simultaneously. You can stop monitoring with action='stop' — but treat stopping as an explicit last resort: only stop a monitor when it is known to be obsolete or redundant (e.g. the same resource is already monitored elsewhere, or the task that needed it is done). The user can also stop via /ghpr-monitor off (stops all) or /ghpr-monitor off <PR> (stops specific). The user can also run /ghpr-monitor check to trigger an immediate poll (all PRs or a specific one). You will receive PR status updates as notifications. The url parameter accepts GitHub PR URLs or shorthand like "owner/repo#123". To watch a standalone GitHub Actions workflow run by id, pass run_id with owner+repo (no pr_number): the monitor polls the run until status becomes "completed", then auto-stops and notifies with the conclusion (success, failure, cancelled, etc.). Use action='preferences' to view or update notification prompt preferences. Calling with no value shows current preferences (with defaults); providing a value in JSON writes new preferences. Set a key to null to reset it to default. Use action='merge' to toggle auto-merge when CI passes (if not disabled by the disableMergeTool preference). When enabled, the monitor will notify you to merge the PR once CI turns green. Notifications are informational by default (they never start a turn); pass wakeOn when starting a monitor — a list of event kinds or ['*'] — to have those events wake you so you can react without the user prompting you.`;
+	const STEERING_PROMPT = `You have access to the ghpr-monitor tool. When the user asks you to watch or monitor a PR, use ghpr-monitor with action "start" to begin monitoring. The tool has actions: start, status, check, merge, stop, and preferences. Multiple PRs/runs can be monitored simultaneously. You can stop monitoring with action='stop' — but treat stopping as an explicit last resort: only stop a monitor when it is known to be obsolete or redundant (e.g. the same resource is already monitored elsewhere, or the task that needed it is done). The user can also stop via /ghpr-monitor off (stops all) or /ghpr-monitor off <PR> (stops specific). The user can also run /ghpr-monitor check to trigger an immediate poll (all PRs or a specific one). You will receive PR status updates as notifications. The url parameter accepts GitHub PR URLs or shorthand like "owner/repo#123". To watch a standalone GitHub Actions workflow run by id, pass run_id with owner+repo (no pr_number): the monitor polls the run until status becomes "completed", then auto-stops and notifies with the conclusion (success, failure, cancelled, etc.). Use action='preferences' to view or update notification prompt preferences. Calling with no value shows current preferences (with defaults); providing a value in JSON writes new preferences. Set a key to null to reset it to default. Use action='merge' to toggle auto-merge when CI passes (if not disabled by the disableMergeTool preference). When enabled, the monitor will notify you to merge the PR once CI turns green. Notifications start a turn by default — every event wakes you, so a red check, a review comment or a merge reaches you without the user prompting you. Pass wakeOn to narrow waking to the event kinds you name, or wakeOn=[] to make a monitor informational-only, where events surface on your next turn instead.`;
 
 	// Custom message renderer for "ghpr-monitor" messages — shows only the
 	// concise summary in the TUI; the agent receives the full content via the
@@ -247,13 +247,13 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 	 * (full detailed body).
 	 *
 	 * Delivery modes:
-	 * - Default (informational): a plain custom message — shown in the TUI
-	 *   and appended to the conversation history; the agent sees it on its
-	 *   next turn without being woken.
-	 * - wake: the monitor's wakeOn list matched this event kind. The message
-	 *   is sent with deliverAs "followUp" + triggerTurn, so it starts a turn
-	 *   when the agent is idle and is delivered right after the current turn
-	 *   when it is mid-work — never an interrupt.
+	 * - Wake (the default): the message is sent with deliverAs "followUp" +
+	 *   triggerTurn, so it starts a turn when the agent is idle and is
+	 *   delivered right after the current turn when it is mid-work — never an
+	 *   interrupt.
+	 * - Informational (the `wakeOn: []` opt-out, and first-poll): a plain
+	 *   custom message — shown in the TUI and appended to the conversation
+	 *   history; the agent sees it on its next turn without being woken.
 	 * - deliverAs "steer": reserved for the deliberate PR/issue create-hook
 	 *   nudges, which must always reach the agent in direct response to its
 	 *   own action.
@@ -467,14 +467,17 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 
 	/**
 	 * Whether a notification of this kind should wake the agent (start a
-	 * turn) for this monitor. Driven by the monitor's `wakeOn` list: event
-	 * kinds (case-insensitive) or "*" for all. first-poll never wakes — it
-	 * is the initial state snapshot, not a change.
+	 * turn) for this monitor. Waking is the default: a monitor that names no
+	 * kinds wakes on every event. A non-empty `wakeOn` list narrows it to the
+	 * kinds it names (case-insensitive, or "*" for all), and an explicitly
+	 * empty list is the opt-out. first-poll never wakes — it is the initial
+	 * state snapshot, not a change.
 	 */
 	function shouldWake(mon: ActiveMonitor, type: string): boolean {
-		const wakeOn = mon.config.wakeOn;
-		if (!wakeOn || wakeOn.length === 0) return false;
 		if (type === "first-poll") return false;
+		const wakeOn = mon.config.wakeOn;
+		if (!wakeOn) return true;
+		if (wakeOn.length === 0) return false;
 		return wakeOn.some((k) => k === "*" || k.toLowerCase() === type.toLowerCase());
 	}
 
@@ -1167,7 +1170,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 		mode: Type.Optional(Type.Union([Type.Literal("all"), Type.Literal("comments"), Type.Literal("conflicts"), Type.Literal("actions")])),
 		interval: Type.Optional(Type.Number({ description: "Polling interval in seconds (default: 60, minimum: 10)" })),
 		events: Type.Optional(Type.Array(Type.String(), { description: "Per-event-kind allowlist forwarded to `gh monitor --events`. When set, only the listed event kinds are emitted; all others are suppressed. Omit to receive every kind (the default). Entries are notification template keys, e.g. 'conflict', 'new-failing-checks', 'merged', 'closed', 'run-completed'. Matching is case-insensitive; unknown kinds are rejected by the CLI." })),
-		wakeOn: Type.Optional(Type.Array(Type.String(), { description: "Event kinds that wake the agent (start a turn) when emitted, e.g. ['new-failing-checks', 'new-unresolved-threads', 'conflict', 'merged']. Use ['*'] to wake on every event (except the initial first-poll snapshot). Omit for informational-only notifications that never start a turn (the default). Matching is case-insensitive." })),
+		wakeOn: Type.Optional(Type.Array(Type.String(), { description: "Event kinds that wake the agent (start a turn) when emitted, e.g. ['new-failing-checks', 'conflict']. Omit to wake on every event, which is the default and what a watch somebody is waiting on wants. Pass [] to make notifications informational-only: they surface on the next turn and never start one. Pass ['*'] to name every kind explicitly. 'first-poll' never wakes. Matching is case-insensitive." })),
 		track_deployments: Type.Optional(Type.Boolean({ description: "After the PR merges, keep polling GitHub deployment statuses for the merged commit until they reach a terminal state (success/failure/error/inactive). Default: false." })),
 		value: Type.Optional(Type.String({ description: "For preferences action: JSON string with preference overrides. Omit to read current preferences." })),
 	}) as any;
@@ -1182,7 +1185,7 @@ export default function ghprMonitorExtension(pi: ExtensionAPI) {
 			"When the user asks you to watch or monitor a PR, use ghpr-monitor with action='start'.",
 			"Multiple PRs can be monitored at the same time — start a new monitor without stopping existing ones.",
 			"Accept a GitHub PR URL, shorthand like 'owner/repo#123', or separate owner/repo/pr_number.",
-			"When starting a monitor, pass wakeOn with the event kinds that should start a turn, e.g. wakeOn=['new-failing-checks', 'conflict'] or wakeOn=['*'] for every event. Without wakeOn, notifications are informational only — they never start a turn. Choose wake events whenever the user expects you to react (fix CI, reply to reviews) without being prompted.",
+			"A monitor wakes you by default: every event starts a turn, so red CI, review comments and a merge reach you without the user prompting you. Leave wakeOn out unless a quieter watch was asked for. wakeOn=['merged', 'ci-all-green'] narrows waking to those kinds, and wakeOn=[] makes the watch informational-only. Never pass wakeOn=[] for a PR whose decision the user is waiting on.",
 			"To watch a standalone GitHub Actions workflow run, pass run_id with owner+repo (no pr_number). The monitor polls the run until status == 'completed', then auto-stops and notifies with the conclusion (success, failure, cancelled, etc.).",
 			"Set track_deployments=true when starting a PR monitor to keep watching GitHub deployment statuses after the PR merges — the monitor notifies on deployment transitions (pending → in_progress → success/failure/error/inactive), auto-stops when they all reach a terminal state, and stops after a few polls if the repo has no deployments.",
 			"Use action='status' to see all currently monitored PRs/runs.",
